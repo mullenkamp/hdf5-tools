@@ -1,0 +1,3 @@
+xarray
+h5py
+hdf5plugin
