@@ -19,7 +19,7 @@ descrip = 'Python hdf5 tools'
 if os.environ.get('READTHEDOCS', False) == 'True':
     INSTALL_REQUIRES = []
 else:
-    INSTALL_REQUIRES = ['xarray', 'h5py', 'hdf5plugin']
+    INSTALL_REQUIRES = ['xarray', 'h5py', 'hdf5plugin', 'h5netcdf']
 
 # Get the long description from the README file
 with open(os.path.join(here, 'README.rst'), encoding='utf-8') as f:
