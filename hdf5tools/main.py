@@ -14,14 +14,8 @@ import cftime
 # import dateutil.parser as dparser
 # import numcodecs
 # import utils
+import hdf5plugin
 from hdf5tools import utils
-try:
-    import hdf5plugin
-    # compressor = hdf5plugin.Blosc()
-    compressor = hdf5plugin.Zstd(1)
-    # compressor = hdf5plugin.LZ4()
-except:
-    compressor = {'compression': 'lzf'}
 
 
 ##############################################
@@ -109,7 +103,7 @@ def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_d
     return ds
 
 
-def xr_to_hdf5(xr_dataset, new_path, group=None, chunks=None, unlimited_dims=None):
+def xr_to_hdf5(xr_dataset, new_path, group=None, chunks=None, unlimited_dims=None, compression='zstd'):
     """
     
     Parameters
@@ -124,12 +118,16 @@ def xr_to_hdf5(xr_dataset, new_path, group=None, chunks=None, unlimited_dims=Non
         The chunks per dataset. Must be a dictionary of dataset name keys with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
     unlimited_dims : str, list of str, or None
         The dimensions that should be assigned as "unlimited".
+    compression : str
+        The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None.
 
     """
     if isinstance(unlimited_dims, str):
         unlimited_dims = [unlimited_dims]
     else:
         unlimited_dims = []
+
+    compressor = utils.get_compressor(compression)
 
     xr_dims_list = list(xr_dataset.dims)
 
@@ -157,7 +155,7 @@ def xr_to_hdf5(xr_dataset, new_path, group=None, chunks=None, unlimited_dims=Non
         new_path.seek(0)
 
 
-def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None):
+def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None, compression='zstd'):
     """
     Function to combine hdf5 files with flattened datasets within a single group.
 
@@ -173,6 +171,8 @@ def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None):
         The chunks per dataset. Must be a dictionary of dataset name keys with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
     unlimited_dims : str, list of str, or None
         The dimensions that should be assigned as "unlimited".
+    compression : str
+        The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None.
 
     Returns
     -------
@@ -182,6 +182,8 @@ def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None):
         unlimited_dims = [unlimited_dims]
     else:
         unlimited_dims = []
+
+    compressor = utils.get_compressor(compression)
 
     ## Create new file
     with h5py.File(new_path, 'w', libver='latest', rdcc_nbytes=3*1024*1024) as nf:

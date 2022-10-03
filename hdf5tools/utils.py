@@ -14,7 +14,7 @@ import numpy as np
 import cftime
 # import dateutil.parser as dparser
 # import numcodecs
-
+import hdf5plugin
 
 
 ########################################################
@@ -415,7 +415,22 @@ def cartesian(arrays, out=None):
     return out
 
 
+def get_compressor(name: str = None):
+    """
 
+    """
+    if name is None:
+        compressor = {}
+    elif name == 'gzip':
+        compressor = {'compression': name}
+    elif name == 'lzf':
+        compressor = {'compression': name}
+    elif name == 'zstd':
+        compressor = hdf5plugin.Zstd(1)
+    else:
+        raise ValueError('name must be one of gzip, lzf, zstd, or None.')
+
+    return compressor
 
 
 
