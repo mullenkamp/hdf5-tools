@@ -181,7 +181,13 @@ def extend_variables(paths, coords_dict, group=None):
                     vars_dict[ds_name]['data'][path] = {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}
                 else:
                     shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
-                    vars_dict[ds_name] = {'data': {path: {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}}, 'dims': tuple(dims), 'shape': shape, 'dtype': ds.dtype, 'fillvalue': ds.fillvalue}
+
+                    if isinstance(ds.dtype, np.number):
+                        fillvalue = ds.fillvalue
+                    else:
+                        fillvalue = None
+
+                    vars_dict[ds_name] = {'data': {path: {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}}, 'dims': tuple(dims), 'shape': shape, 'dtype': ds.dtype, 'fillvalue': fillvalue}
 
         f.close()
 

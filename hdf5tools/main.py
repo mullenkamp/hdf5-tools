@@ -4,6 +4,7 @@ Created on 2022-09-30.
 @author: Mike K
 """
 import h5py
+import io
 import os
 import numpy as np
 import xarray as xr
@@ -41,12 +42,17 @@ def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_d
     maxshape = tuple([s if dims[i] not in unlimited_dims else None for i, s in enumerate(shape)])
 
     encoding = xr_dataset[var_name].encoding.copy()
+
+    if xr_dataset[var_name].dtype.name == 'object':
+        xr_dataset[var_name] = xr_dataset[var_name].astype(h5py.string_dtype())
+        encoding['dtype'] = h5py.string_dtype()
+
     if 'dtype' not in encoding:
         encoding['dtype'] = xr_dataset[var_name].dtype
+
     attrs = xr_dataset[var_name].attrs.copy()
 
     enc = {k: v for k, v in encoding.items() if k in utils.encode_data.__code__.co_varnames}
-    enc['dtype'] = enc['dtype'].name
 
     if 'calendar' in enc:
         enc['units'] = 'seconds since 1970-01-01 00:00:00'
@@ -58,19 +64,12 @@ def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_d
         fillvalue = None
 
     chunks1 = utils.guess_chunk(shape, maxshape, encoding['dtype'])
-    # chunks1 = None
 
     if isinstance(chunks, dict):
         if var_name in chunks:
             chunks1 = chunks[var_name]
 
     ds = hdf.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=encoding['dtype'], fillvalue=fillvalue, **compressor)
-
-    # if (chunks1 is None):
-    #     old_chunks = ds.chunks
-    #     _ = hdf.pop(var_name)
-    #     new_chunks = tuple([int(c*dim_chunk_mupliplier) if int(c*dim_chunk_mupliplier) <= shape[i] else shape[i] for i, c in enumerate(old_chunks)])
-    #     ds = hdf.create_dataset(var_name, shape, chunks=new_chunks, maxshape=maxshape, dtype=encoding['dtype'], **compressor)
 
     if ('scale_factor' in enc) or ('add_offset' in enc) or ('calendar' in enc):
         if ds.chunks == shape:
@@ -82,19 +81,6 @@ def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_d
                 # print(new_slice, source_slice)
                 ds[new_slice] = utils.encode_data(xr_dataset[var_name][source_slice].copy().load().values, **enc)
 
-            # for chunk in ds.iter_chunks():
-                # print(chunk)
-
-                # data = xr_dataset[var_name][chunk].copy().load().values
-                # data_bool = ~np.isnan(data)
-
-                # if np.any(data_bool):
-                #     slice_arrays = [(s.min(), s.max() + 1) for s in np.where(data_bool)]
-                #     slices = tuple([slice(chunk[i].start + s[0], chunk[i].start + s[1]) for i, s in enumerate(slice_arrays)])
-                #     source_slices = tuple([slice(s[0], s[1]) for s in slice_arrays])
-                #     ds[slices] = encode_data(data[source_slices], **enc)
-
-                # ds[chunk] = encode_data(xr_dataset[var_name][chunk].copy().load().values, **enc)
     else:
         if ds.chunks == shape:
             ds[:] = xr_dataset[var_name].copy().load().values
@@ -105,20 +91,6 @@ def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_d
                 # print(new_slice, source_slice)
                 ds[new_slice] = xr_dataset[var_name][source_slice].copy().load().values
 
-            # for chunk in ds.iter_chunks():
-                # print(chunk)
-                # data = xr_dataset[var_name][chunk].copy().load().values
-                # data_bool = ~np.isnan(data)
-                # if np.any(data_bool):
-                #     slice_arrays = [(s.min(), s.max() + 1) for s in np.where(data_bool)]
-                #     slices = tuple([slice(chunk[i].start + s[0], chunk[i].start + s[1]) for i, s in enumerate(slice_arrays)])
-                #     source_slices = tuple([slice(s[0], s[1]) for s in slice_arrays])
-                #     ds[slices] = encode_data(data[source_slices], **enc)
-                # ds[chunk] = xr_dataset[var_name][chunk].copy().load().values
-
-    # elif 'float' in enc['dtype']:
-    #     enc['_FillValue'] = np.array([np.nan], dtype='float32')
-
     _ = enc.pop('dtype')
     # print(enc)
     attrs.update(enc)
@@ -126,19 +98,7 @@ def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_d
     ds.attrs.update(attrs)
 
     if var_name in xr_dataset.dims:
-        # p = list(xr_dataset.dims).index(var_name)
-        # ds_attrs = {'_Netcdf4Coordinates': np.array([p], dtype='int16'), '_Netcdf4Dimid': p}
-        # ds_attrs = {'_Netcdf4Dimid': p}
-
-        # ds.attrs.update(ds_attrs)
-
         ds.make_scale(var_name)
-    # else:
-    #     ds_dims = list(xr_dataset.dims)
-
-    #     ds_attrs = {'_Netcdf4Coordinates': np.array([ds_dims.index(dim) for dim in dims], dtype='int16'), '_Netcdf4Dimid': 2}
-
-    #     ds.attrs.update(ds_attrs)
 
     ds_dims = ds.dims
     for i, dim in enumerate(dims):
@@ -189,10 +149,12 @@ def xr_to_hdf5(xr_dataset, new_path, group=None, chunks=None, unlimited_dims=Non
             _ = create_nc_dataset(g, xr_dataset, var, chunks, compressor, unlimited_dims)
     
         ## Dataset attrs
-        # attrs = {'_NCProperties': b'version=2,h5netcdf=1.0.2,hdf5=1.12.2,h5py=3.7.0'}
         attrs = {}
         attrs.update(xr_dataset.attrs)
         g.attrs.update(attrs)
+
+    if isinstance(new_path, io.BytesIO):
+        new_path.seek(0)
 
 
 def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None):
@@ -246,20 +208,9 @@ def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None):
 
             ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=arr.dtype, **compressor)
     
-            # old_chunks = ds.chunks
-    
-            # if (old_chunks != shape) and (chunks1 is None):
-            #     _ = nf1.pop(coord)
-            #     new_chunks = tuple([int(c*dim_chunk_mupliplier) if int(c*dim_chunk_mupliplier) <= shape[i] else shape[i] for i, c in enumerate(old_chunks)])
-            #     ds = nf1.create_dataset(coord, shape, chunks=new_chunks, maxshape=maxshape, dtype=arr.dtype, **compressor)
-    
             ds[:] = arr
     
             ds.make_scale(coord)
-    
-            # p = list(ds.dims).index(coord)
-            # ds_attrs = {'_Netcdf4Coordinates': np.array([p], dtype='int16'), '_Netcdf4Dimid': p}
-            # ds.attrs.update(ds_attrs)
     
         ## Add the variables as datasets
         vars_dict = utils.extend_variables(paths, coords_dict, group)
@@ -277,23 +228,10 @@ def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None):
     
             ds = nf1.create_dataset(dim_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[dim_name]['dtype'], fillvalue=vars_dict[dim_name]['fillvalue'], **compressor)
     
-            # old_chunks = ds.chunks
-    
-            # if (old_chunks != shape) and (chunks1 is None):
-            #     _ = nf1.pop(dim_name)
-            #     new_chunks = tuple([int(c*dim_chunk_mupliplier) if int(c*dim_chunk_mupliplier) <= shape[i] else shape[i] for i, c in enumerate(old_chunks)])
-            #     ds = nf1.create_dataset(dim_name, shape, chunks=new_chunks, maxshape=maxshape, dtype=vars_dict[dim_name]['dtype'], **compressor)
-    
             ds_dims = ds.dims
             for i, dim in enumerate(dims):
                 ds_dims[i].attach_scale(nf1[dim])
                 ds_dims[i].label = dim
-    
-            # ds_dims = list(ds.dims)
-    
-            # ds_attrs = {'_Netcdf4Coordinates': np.array([ds_dims.index(dim) for dim in dims], dtype='int16')}
-    
-            # ds.attrs.update(ds_attrs)
     
             # Load the data by chunk
             for path in vars_dict[dim_name]['data']:
@@ -344,6 +282,9 @@ def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None):
             global_attrs.update(dict(f1.attrs))
 
         nf1.attrs.update(global_attrs)
+
+    if isinstance(new_path, io.BytesIO):
+        new_path.seek(0)
 
 
 def open_dataset(path, **kwargs):
