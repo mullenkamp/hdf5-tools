@@ -119,25 +119,29 @@ def extend_coords(paths, group=None):
     coords_dict = {}
 
     for path in paths:
-        f = h5py.File(path, 'r')
+        with h5py.File(path, 'r') as f:
 
-        if isinstance(group, str):
-            f1 = f[group]
-        else:
-            f1 = f
-
-        ds_list = list(f1.keys())
-
-        for ds_name in ds_list:
-            if is_scale(f1[ds_name]):
-                ds = f1[ds_name]
-
-                if ds_name in coords_dict:
-                    coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds[:])
-                else:
-                    coords_dict[ds_name] = ds[:]
-
-        f.close()
+            if isinstance(group, str):
+                f1 = f[group]
+            else:
+                f1 = f
+    
+            ds_list = list(f1.keys())
+    
+            for ds_name in ds_list:
+                if is_scale(f1[ds_name]):
+                    ds = f1[ds_name]
+    
+                    if ds.dtype.name == 'object':
+                        if ds_name in coords_dict:
+                            coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds[:]).astype(h5py.string_dtype())
+                        else:
+                            coords_dict[ds_name] = ds[:].astype(h5py.string_dtype())
+                    else:
+                        if ds_name in coords_dict:
+                            coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds[:])
+                        else:
+                            coords_dict[ds_name] = ds[:]
 
     return coords_dict
 
@@ -149,47 +153,49 @@ def extend_variables(paths, coords_dict, group=None):
     vars_dict = {}
 
     for path in paths:
-        f = h5py.File(path, 'r')
+        with h5py.File(path, 'r') as f:
 
-        if isinstance(group, str):
-            f1 = f[group]
-        else:
-            f1 = f
-
-        ds_list = list(f1.keys())
-
-        for ds_name in ds_list:
-            if not is_scale(f1[ds_name]):
-                ds = f1[ds_name]
-
-                dims = []
-                slice_index = []
-
-                for dim in ds.dims:
-                    dim_name = dim[0].name.split('/')[-1]
-                    dims.append(dim_name)
-                    arr_index = np.where(np.isin(coords_dict[dim_name], dim[0][:]))[0]
-                    slice1 = slice(arr_index.min(), arr_index.max() + 1)
-                    slice_index.append(slice1)
-
-                if ds_name in vars_dict:
-                    if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
-                        raise ValueError('dims are not consistant between the same named datasets.')
-                    if vars_dict[ds_name]['dtype'] != ds.dtype:
-                        raise ValueError('dtypes are not consistant between the same named datasets.')
-
-                    vars_dict[ds_name]['data'][path] = {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}
-                else:
-                    shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
-
-                    if isinstance(ds.dtype, np.number):
-                        fillvalue = ds.fillvalue
+            if isinstance(group, str):
+                f1 = f[group]
+            else:
+                f1 = f
+    
+            ds_list = list(f1.keys())
+    
+            for ds_name in ds_list:
+                if not is_scale(f1[ds_name]):
+                    ds = f1[ds_name]
+    
+                    dims = []
+                    slice_index = []
+    
+                    for dim in ds.dims:
+                        dim_name = dim[0].name.split('/')[-1]
+                        dims.append(dim_name)
+                        arr_index = np.where(np.isin(coords_dict[dim_name], dim[0][:]))[0]
+    
+                        if np.any(np.diff(arr_index) != 1) and len(arr_index) > 1:
+                            slice_index.append(arr_index)
+                        else:
+                            slice1 = slice(arr_index.min(), arr_index.max() + 1)
+                            slice_index.append(slice1)
+    
+                    if ds_name in vars_dict:
+                        if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
+                            raise ValueError('dims are not consistant between the same named datasets.')
+                        if vars_dict[ds_name]['dtype'] != ds.dtype:
+                            raise ValueError('dtypes are not consistant between the same named datasets.')
+    
+                        vars_dict[ds_name]['data'][path] = {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}
                     else:
-                        fillvalue = None
-
-                    vars_dict[ds_name] = {'data': {path: {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}}, 'dims': tuple(dims), 'shape': shape, 'dtype': ds.dtype, 'fillvalue': fillvalue}
-
-        f.close()
+                        shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
+    
+                        if isinstance(ds.dtype, np.number):
+                            fillvalue = ds.fillvalue
+                        else:
+                            fillvalue = None
+    
+                        vars_dict[ds_name] = {'data': {path: {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}}, 'dims': tuple(dims), 'shape': shape, 'dtype': ds.dtype, 'fillvalue': fillvalue}
 
     return vars_dict
 
@@ -198,55 +204,54 @@ def index_coords(hdf_path: str, selection: dict, group: str = None):
     """
 
     """
-    # with h5py.File(hdf_path, 'r') as f:
-    f = h5py.File(hdf_path, 'r')
+    with h5py.File(hdf_path, 'r') as f:
 
-    if isinstance(group, str):
-        f1 = f[group]
-    else:
-        f1 = f
-
-    coords_list = [ds_name for ds_name in f1 if is_scale(f1[ds_name])]
-
-    index_coords_dict = {}
-
-    for coord, sel in selection.items():
-        if coord not in coords_list:
-            raise ValueError(coord + ' is not in the coordiantes of the hdf5 file.')
-
-        attrs = dict(f1[coord].attrs)
-        enc = {k: v for k, v in attrs.items() if k in decode_data.__code__.co_varnames}
-
-        arr = decode_data(f1[coord][:], **enc)
-
-        if isinstance(sel, slice):
-            if 'datetime64' in arr.dtype.name:
-                start = np.datetime64(sel.start, 's')
-                end = np.datetime64(sel.stop, 's')
-                bool_index = (start <= arr) & (arr < end)
-            else:
-                bool_index = (sel.start <= arr) & (arr < sel.stop)
-
+        if isinstance(group, str):
+            f1 = f[group]
         else:
-            if isinstance(sel, (int, float)):
-                sel = [sel]
-
-            try:
-                sel1 = np.array(sel)
-            except:
-                raise TypeError('selection input could not be coerced to an ndarray.')
-
-            if sel1.dtype.name == 'bool':
-                if sel1.shape[0] != arr.shape[0]:
-                    raise ValueError('The boolean array does not have the same length as the coord array.')
-                bool_index = sel1
+            f1 = f
+        
+        coords_list = [ds_name for ds_name in f1 if is_scale(f1[ds_name])]
+        
+        index_coords_dict = {}
+        
+        for coord, sel in selection.items():
+            if coord not in coords_list:
+                raise ValueError(coord + ' is not in the coordiantes of the hdf5 file.')
+        
+            attrs = dict(f1[coord].attrs)
+            enc = {k: v for k, v in attrs.items() if k in decode_data.__code__.co_varnames}
+        
+            arr = decode_data(f1[coord][:], **enc)
+        
+            if isinstance(sel, slice):
+                if 'datetime64' in arr.dtype.name:
+                    start = np.datetime64(sel.start, 's')
+                    end = np.datetime64(sel.stop, 's')
+                    bool_index = (start <= arr) & (arr < end)
+                else:
+                    bool_index = (sel.start <= arr) & (arr < sel.stop)
+        
             else:
-                bool_index = np.in1d(arr, sel1)
-
-        int_index = np.where(bool_index)[0]
-        slice_index = slice(int_index.min(), int_index.max())
-
-        index_coords_dict[coord] = {'bool_index': bool_index, 'int_index': int_index, 'slice_index': slice_index}
+                if isinstance(sel, (int, float)):
+                    sel = [sel]
+        
+                try:
+                    sel1 = np.array(sel)
+                except:
+                    raise TypeError('selection input could not be coerced to an ndarray.')
+        
+                if sel1.dtype.name == 'bool':
+                    if sel1.shape[0] != arr.shape[0]:
+                        raise ValueError('The boolean array does not have the same length as the coord array.')
+                    bool_index = sel1
+                else:
+                    bool_index = np.in1d(arr, sel1)
+        
+            int_index = np.where(bool_index)[0]
+            slice_index = slice(int_index.min(), int_index.max())
+        
+            index_coords_dict[coord] = {'bool_index': bool_index, 'int_index': int_index, 'slice_index': slice_index}
 
     return index_coords_dict
 
@@ -317,48 +322,112 @@ def guess_chunk(shape, maxshape, dtype):
     return tuple(int(x) for x in chunks)
 
 
-def copy_chunks(shape, chunks, source_slice_index=None, source_dim_index=None, factor=3):
+def copy_chunks_simple(shape, chunks, factor=3):
     """
 
     """
     n_shapes = []
 
-    if isinstance(source_slice_index, (list, tuple)) and isinstance(source_dim_index, (list, tuple)):
-        copy_shape = tuple([s*factor if s*factor <= (source_slice_index[i].stop - source_slice_index[i].start) else (source_slice_index[i].stop - source_slice_index[i].start) for i, s in enumerate(chunks)])
+    copy_shape = tuple([s*factor if s*factor <= shape[i] else shape[i] for i, s in enumerate(chunks)])
+    for i, s in enumerate(copy_shape):
+        shapes = np.arange(0, shape[i], s)
+        n_shapes.append(shapes)
 
-        for i, s in enumerate(copy_shape):
-            shapes = np.arange(source_slice_index[i].start, source_slice_index[i].stop, s)
-            n_shapes.append(shapes)
+    # cart = np.array(np.meshgrid(n_shapes)).T.reshape(-1, len(shape))
+    cart = cartesian(n_shapes)
 
-        cart = cartesian(n_shapes)
+    slices = []
+    append = slices.append
+    for arr in cart:
+        slices1 = tuple([slice(s, s + copy_shape[i]) if s + copy_shape[i] <= shape[i] else slice(s, shape[i]) for i, s in enumerate(arr)])
+        append(slices1)
 
-        slices = []
-        append = slices.append
-        for arr in cart:
-            slices1 = tuple([slice(s, s + copy_shape[i]) if s + copy_shape[i] <= source_slice_index[i].stop else slice(s, source_slice_index[i].stop) for i, s in enumerate(arr)])
-            append(slices1)
+    source_slices = slices
 
-        source_slices = []
-        append = source_slices.append
-        for s in slices:
-            source_chunk = tuple([slice(s[i].start - source_slice_index[i].start, s[i].stop - source_slice_index[i].start) for i in source_dim_index])
-            append(source_chunk)
+    return slices, source_slices
 
-    else:
-        copy_shape = tuple([s*factor if s*factor <= shape[i] else shape[i] for i, s in enumerate(chunks)])
-        for i, s in enumerate(copy_shape):
-            shapes = np.arange(0, shape[i], s)
-            n_shapes.append(shapes)
 
-        cart = cartesian(n_shapes)
+def copy_chunks_complex(shape, chunks, source_slice_index, source_dim_index, factor=3):
+    """
 
-        slices = []
-        append = slices.append
-        for arr in cart:
-            slices1 = tuple([slice(s, s + copy_shape[i]) if s + copy_shape[i] <= shape[i] else slice(s, shape[i]) for i, s in enumerate(arr)])
-            append(slices1)
-    
-        source_slices = slices
+    """
+    source_shapes = []
+    new_shapes = []
+    big_chunks = []
+    for i, s in enumerate(chunks):
+        s1 = s*factor
+
+        ssi = source_slice_index[i]
+        if isinstance(ssi, slice):
+            len1 = ssi.stop - ssi.start
+        else:
+            len1 = len(ssi)
+
+        if s1 <= len1:
+            s2 = s1
+        else:
+            s2 = len1
+
+        if isinstance(ssi, slice):
+            shapes = np.arange(source_slice_index[i].start, source_slice_index[i].stop, s2)
+            s_shapes = np.arange(0, source_slice_index[i].stop - source_slice_index[i].start, s2)
+        else:
+            shapes1 = [ssi[i * s2:(i + 1) * s2] for i in range((len(ssi) + s2 - 1) // s2 )]
+            a = np.arange(0, len(ssi))
+            shapes2 = [a[i * s2:(i + 1) * s2] for i in range((len(a) + s2 - 1) // s2 )]
+
+            if len(shapes1) == 1:
+                shapes = np.empty(1, dtype='object')
+                shapes[:] = shapes1
+                s_shapes = np.empty(1, dtype='object')
+                s_shapes[:] = shapes2
+            else:
+                shapes = shapes1
+                s_shapes = shapes2
+
+        source_shapes.append(s_shapes)
+        new_shapes.append(shapes)
+        big_chunks.append(s2)
+
+    # cart = cartesian(new_shapes)
+    # source_cart = cartesian(source_shapes)
+
+    cart = np.array(np.meshgrid(new_shapes)).T.reshape(-1, len(shape))
+    source_cart = np.array(np.meshgrid(source_shapes)).T.reshape(-1, len(shape))
+
+    slices = []
+    append = slices.append
+    for arr in cart:
+        slices1 = []
+        for i, val in enumerate(arr):
+            if isinstance(val, np.ndarray):
+                slice2 = val
+            else:
+                if val + big_chunks[i] <= source_slice_index[i].stop:
+                    slice2 = slice(val, val + big_chunks[i])
+                else:
+                    slice2 = slice(val, source_slice_index[i].stop)
+
+            slices1.append(slice2)
+
+        append(tuple(slices1))
+
+    source_slices = []
+    append = source_slices.append
+    for arr in source_cart:
+        slices1 = []
+        for i, val in enumerate(arr):
+            if isinstance(val, np.ndarray):
+                slice2 = val
+            else:
+                if val + big_chunks[i] <= source_slice_index[i].stop:
+                    slice2 = slice(val, val + big_chunks[i])
+                else:
+                    slice2 = slice(val, source_slice_index[i].stop)
+
+            slices1.append(slice2)
+
+        append(tuple(slices1[source_dim_index.index(i)] for i in range(len(source_dim_index))))
 
     return slices, source_slices
 
@@ -384,17 +453,17 @@ def cartesian(arrays, out=None):
     --------
     >>> cartesian(([1, 2, 3], [4, 5], [6, 7]))
     array([[1, 4, 6],
-           [1, 4, 7],
-           [1, 5, 6],
-           [1, 5, 7],
-           [2, 4, 6],
-           [2, 4, 7],
-           [2, 5, 6],
-           [2, 5, 7],
-           [3, 4, 6],
-           [3, 4, 7],
-           [3, 5, 6],
-           [3, 5, 7]])
+            [1, 4, 7],
+            [1, 5, 6],
+            [1, 5, 7],
+            [2, 4, 6],
+            [2, 4, 7],
+            [2, 5, 6],
+            [2, 5, 7],
+            [3, 4, 6],
+            [3, 4, 7],
+            [3, 5, 6],
+            [3, 5, 7]])
 
     """
 

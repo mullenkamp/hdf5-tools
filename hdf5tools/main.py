@@ -14,8 +14,8 @@ import cftime
 # import dateutil.parser as dparser
 # import numcodecs
 # import utils
-import hdf5plugin
 from hdf5tools import utils
+import hdf5plugin
 
 
 ##############################################
@@ -69,7 +69,7 @@ def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_d
         if ds.chunks == shape:
             ds[:] = utils.encode_data(xr_dataset[var_name].copy().load().values, **enc)
         else:
-            new_slices, source_slices = utils.copy_chunks(shape, chunks1)
+            new_slices, source_slices = utils.copy_chunks_simple(shape, chunks1)
 
             for new_slice, source_slice in zip(new_slices, source_slices):
                 # print(new_slice, source_slice)
@@ -79,7 +79,7 @@ def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_d
         if ds.chunks == shape:
             ds[:] = xr_dataset[var_name].copy().load().values
         else:
-            new_slices, source_slices = utils.copy_chunks(shape, chunks1)
+            new_slices, source_slices = utils.copy_chunks_simple(shape, chunks1)
 
             for new_slice, source_slice in zip(new_slices, source_slices):
                 # print(new_slice, source_slice)
@@ -105,7 +105,7 @@ def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_d
 
 def xr_to_hdf5(xr_dataset, new_path, group=None, chunks=None, unlimited_dims=None, compression='zstd'):
     """
-    
+
     Parameters
     ----------
     xr_dataset : xr.Dataset
@@ -137,15 +137,15 @@ def xr_to_hdf5(xr_dataset, new_path, group=None, chunks=None, unlimited_dims=Non
             g = f.create_group(group)
         else:
             g = f
-    
+
         ## Create coords
         for coord in xr_dims_list:
             _ = create_nc_dataset(g, xr_dataset, coord, chunks, compressor, unlimited_dims)
-    
+
         ## Create data vars
         for var in list(xr_dataset.data_vars):
             _ = create_nc_dataset(g, xr_dataset, var, chunks, compressor, unlimited_dims)
-    
+
         ## Dataset attrs
         attrs = {}
         attrs.update(xr_dataset.attrs)
@@ -192,10 +192,10 @@ def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None, 
             nf1 = nf.create_group(group)
         else:
             nf1 = nf
-    
+
         ## Get the extended coords
         coords_dict = utils.extend_coords(paths, group)
-    
+
         ## Add the coords as datasets
         for coord, arr in coords_dict.items():
             shape = arr.shape
@@ -203,85 +203,87 @@ def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None, 
             maxshape = tuple([s if s not in unlimited_dims else None for s in shape])
 
             chunks1 = utils.guess_chunk(shape, maxshape, arr.dtype)
-    
+
             if isinstance(chunks, dict):
                 if coord in chunks:
                     chunks1 = chunks[coord]
 
             ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=arr.dtype, **compressor)
-    
+
             ds[:] = arr
-    
+
             ds.make_scale(coord)
-    
+
         ## Add the variables as datasets
         vars_dict = utils.extend_variables(paths, coords_dict, group)
-    
-        for dim_name in vars_dict:
-            shape = vars_dict[dim_name]['shape']
-            dims = vars_dict[dim_name]['dims']
+
+        for var_name in vars_dict:
+            shape = vars_dict[var_name]['shape']
+            dims = vars_dict[var_name]['dims']
             maxshape = tuple([s if dims[i] not in unlimited_dims else None for i, s in enumerate(shape)])
-    
-            chunks1 = utils.guess_chunk(shape, maxshape, vars_dict[dim_name]['dtype'])
-    
+
+            chunks1 = utils.guess_chunk(shape, maxshape, vars_dict[var_name]['dtype'])
+
             if isinstance(chunks, dict):
-                if dim_name in chunks:
-                    chunks1 = chunks[dim_name]
-    
-            ds = nf1.create_dataset(dim_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[dim_name]['dtype'], fillvalue=vars_dict[dim_name]['fillvalue'], **compressor)
-    
+                if var_name in chunks:
+                    chunks1 = chunks[var_name]
+
+            ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[var_name]['dtype'], fillvalue=vars_dict[var_name]['fillvalue'], **compressor)
+
             ds_dims = ds.dims
             for i, dim in enumerate(dims):
                 ds_dims[i].attach_scale(nf1[dim])
                 ds_dims[i].label = dim
-    
+
             # Load the data by chunk
-            for path in vars_dict[dim_name]['data']:
-                f = h5py.File(path, 'r')
+            for path in vars_dict[var_name]['data']:
+                with h5py.File(path, 'r') as f:
+
+                    if isinstance(group, str):
+                        f1 = f[group]
+                    else:
+                        f1 = f
     
+                    ds_old = f1[var_name]
+    
+                    source_slice_index = vars_dict[var_name]['data'][path]['slice_index']
+                    dims_order = vars_dict[var_name]['data'][path]['dims_order']
+    
+                    source_dim_index = [dims_order.index(dim) for dim in dims]
+                    source_slice_index = tuple(source_slice_index[i] for i in source_dim_index)
+    
+                    new_slices, source_slices = utils.copy_chunks_complex(shape, chunks1, source_slice_index, source_dim_index)
+    
+                    for new_slice, source_slice in zip(new_slices, source_slices):
+                        # print(new_slice, source_slice)
+                        if dims == dims_order:
+                            ds[new_slice] = ds_old[source_slice]
+                        else:
+                            ds[new_slice] = ds_old[source_slice].transpose(source_dim_index)
+    
+                    # for chunk in ds.iter_chunks(slice_index):
+                    #     # print(chunk)
+                    #     source_chunk = tuple([slice(chunk[i].start - slice_index[i].start, chunk[i].stop - slice_index[i].start) for i in dims_index])
+                    #     ds[chunk] = ds_old[source_chunk]
+
+        ## Assign attrs
+        global_attrs = {}
+        for path in paths:
+            with h5py.File(path, 'r') as f:
+
                 if isinstance(group, str):
                     f1 = f[group]
                 else:
                     f1 = f
     
-                ds_old = f1[dim_name]
+                ds_list = list(f1.keys())
     
-                source_slice_index = vars_dict[dim_name]['data'][path]['slice_index']
-                dims_order = vars_dict[dim_name]['data'][path]['dims_order']
+                for ds_name in ds_list:
+                    attrs = {k: v for k, v in f1[ds_name].attrs.items() if k not in ['DIMENSION_LABELS', 'DIMENSION_LIST', 'CLASS', 'NAME', '_Netcdf4Coordinates', '_Netcdf4Dimid', 'REFERENCE_LIST']}
+                    # print(attrs)
+                    nf1[ds_name].attrs.update(attrs)
     
-                source_dim_index = [dims_order.index(dim) for dim in dims]
-
-                new_slices, source_slices = utils.copy_chunks(shape, chunks1, source_slice_index, source_dim_index)
-
-                for new_slice, source_slice in zip(new_slices, source_slices):
-                    # print(new_slice, source_slice)
-                    ds[new_slice] = ds_old[source_slice]
-
-                # for chunk in ds.iter_chunks(slice_index):
-                #     # print(chunk)
-                #     source_chunk = tuple([slice(chunk[i].start - slice_index[i].start, chunk[i].stop - slice_index[i].start) for i in dims_index])
-                #     ds[chunk] = ds_old[source_chunk]
-    
-                f.close()
-    
-        ## Assign attrs
-        global_attrs = {}
-        for path in paths:
-            f = h5py.File(path, 'r')
-    
-            if isinstance(group, str):
-                f1 = f[group]
-            else:
-                f1 = f
-    
-            ds_list = list(f1.keys())
-    
-            for ds_name in ds_list:
-                attrs = {k: v for k, v in f1[ds_name].attrs.items() if k not in ['DIMENSION_LABELS', 'DIMENSION_LIST', 'CLASS', 'NAME', '_Netcdf4Coordinates', '_Netcdf4Dimid', 'REFERENCE_LIST']}
-                # print(attrs)
-                nf1[ds_name].attrs.update(attrs)
-
-            global_attrs.update(dict(f1.attrs))
+                global_attrs.update(dict(f1.attrs))
 
         nf1.attrs.update(global_attrs)
 
@@ -293,7 +295,7 @@ def open_dataset(path, **kwargs):
     """
     The Xarray open_dataset function, but specifically with the h5netcdf engine to open hdf5 files.
     """
-    ds = xr.open_dataset(path, engine='h5netcdf', **kwargs)
+    ds = xr.open_dataset(path, engine='h5netcdf', cache=False, **kwargs)
 
     return ds
 
