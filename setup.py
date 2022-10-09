@@ -10,7 +10,7 @@ here = os.path.abspath(os.path.dirname(__file__))
 name = 'hdf5tools'
 main_package = 'hdf5tools'
 datasets = 'datasets'
-version = '0.0.5'
+version = '0.0.6'
 descrip = 'Python hdf5 tools'
 
 # The below code is for readthedocs. To have sphinx/readthedocs interact with
@@ -128,7 +128,7 @@ setup(
     #
     #   py_modules=["my_module"],
     #
-    packages=find_packages(exclude=['contrib', 'docs', 'tests', '__pycashe__']),  # Required
+    packages=find_packages(exclude=['contrib', 'sphinx', 'hdf5tools.tests*', '__pycashe__']),  # Required
 
     # This field lists other packages that your project depends on to run.
     # Any package you put here will be installed by pip when your project is

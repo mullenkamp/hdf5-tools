@@ -263,63 +263,66 @@ def guess_chunk(shape, maxshape, dtype):
     each axis, slightly favoring bigger values for the last index.
     Undocumented and subject to change without warning.
     """
-    # pylint: disable=unused-argument
 
-    # For unlimited dimensions we have to guess 1024
-    shape1 = []
-    for i, x in enumerate(maxshape):
-        if x is None:
-            if shape[i] > 1024:
-                shape1.append(shape[i])
+    if len(shape) > 0:
+
+        # For unlimited dimensions we have to guess 1024
+        shape1 = []
+        for i, x in enumerate(maxshape):
+            if x is None:
+                if shape[i] > 1024:
+                    shape1.append(shape[i])
+                else:
+                    shape1.append(1024)
             else:
-                shape1.append(1024)
-        else:
-            shape1.append(x)
-
-    shape = tuple(shape1)
-
-    ndims = len(shape)
-    if ndims == 0:
-        raise ValueError("Chunks not allowed for scalar datasets.")
-
-    chunks = np.array(shape, dtype='=f8')
-    if not np.all(np.isfinite(chunks)):
-        raise ValueError("Illegal value in chunk tuple")
-
-    # Determine the optimal chunk size in bytes using a PyTables expression.
-    # This is kept as a float.
-    typesize = dtype.itemsize
-    # dset_size = np.product(chunks)*typesize
-    # target_size = CHUNK_BASE * (2**np.log10(dset_size/(1024.*1024)))
-
-    # if target_size > CHUNK_MAX:
-    #     target_size = CHUNK_MAX
-    # elif target_size < CHUNK_MIN:
-    #     target_size = CHUNK_MIN
-
-    target_size = CHUNK_MAX
-
-    idx = 0
-    while True:
-        # Repeatedly loop over the axes, dividing them by 2.  Stop when:
-        # 1a. We're smaller than the target chunk size, OR
-        # 1b. We're within 50% of the target chunk size, AND
-        #  2. The chunk is smaller than the maximum chunk size
-
-        chunk_bytes = np.product(chunks)*typesize
-
-        if (chunk_bytes < target_size or \
-         abs(chunk_bytes-target_size)/target_size < 0.5) and \
-         chunk_bytes < CHUNK_MAX:
-            break
-
-        if np.product(chunks) == 1:
-            break  # Element size larger than CHUNK_MAX
-
-        chunks[idx%ndims] = np.ceil(chunks[idx%ndims] / 2.0)
-        idx += 1
-
-    return tuple(int(x) for x in chunks)
+                shape1.append(x)
+    
+        shape = tuple(shape1)
+    
+        ndims = len(shape)
+        if ndims == 0:
+            raise ValueError("Chunks not allowed for scalar datasets.")
+    
+        chunks = np.array(shape, dtype='=f8')
+        if not np.all(np.isfinite(chunks)):
+            raise ValueError("Illegal value in chunk tuple")
+    
+        # Determine the optimal chunk size in bytes using a PyTables expression.
+        # This is kept as a float.
+        typesize = dtype.itemsize
+        # dset_size = np.product(chunks)*typesize
+        # target_size = CHUNK_BASE * (2**np.log10(dset_size/(1024.*1024)))
+    
+        # if target_size > CHUNK_MAX:
+        #     target_size = CHUNK_MAX
+        # elif target_size < CHUNK_MIN:
+        #     target_size = CHUNK_MIN
+    
+        target_size = CHUNK_MAX
+    
+        idx = 0
+        while True:
+            # Repeatedly loop over the axes, dividing them by 2.  Stop when:
+            # 1a. We're smaller than the target chunk size, OR
+            # 1b. We're within 50% of the target chunk size, AND
+            #  2. The chunk is smaller than the maximum chunk size
+    
+            chunk_bytes = np.product(chunks)*typesize
+    
+            if (chunk_bytes < target_size or \
+             abs(chunk_bytes-target_size)/target_size < 0.5) and \
+             chunk_bytes < CHUNK_MAX:
+                break
+    
+            if np.product(chunks) == 1:
+                break  # Element size larger than CHUNK_MAX
+    
+            chunks[idx%ndims] = np.ceil(chunks[idx%ndims] / 2.0)
+            idx += 1
+    
+        return tuple(int(x) for x in chunks)
+    else:
+        return None
 
 
 def copy_chunks_simple(shape, chunks, factor=3):

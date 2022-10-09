@@ -37,12 +37,17 @@ def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_d
 
     encoding = xr_dataset[var_name].encoding.copy()
 
-    if xr_dataset[var_name].dtype.name == 'object':
+    if (xr_dataset[var_name].dtype.name == 'object') or ('str' in xr_dataset[var_name].dtype.name):
         xr_dataset[var_name] = xr_dataset[var_name].astype(h5py.string_dtype())
         encoding['dtype'] = h5py.string_dtype()
+    elif 'datetime64' in xr_dataset[var_name].dtype.name:
+        encoding['dtype'] = np.dtype('int64')
+        encoding['calendar'] = 'gregorian'
 
     if 'dtype' not in encoding:
         encoding['dtype'] = xr_dataset[var_name].dtype
+    elif isinstance(encoding['dtype'], str):
+        encoding['dtype'] = np.dtype(encoding['dtype'])
 
     attrs = xr_dataset[var_name].attrs.copy()
 
@@ -63,9 +68,20 @@ def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_d
         if var_name in chunks:
             chunks1 = chunks[var_name]
 
-    ds = hdf.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=encoding['dtype'], fillvalue=fillvalue, **compressor)
+    if len(shape) == 0:
+        chunks1 = None
+        compressor1 = {}
+        fillvalue = None
+        maxshape = None
+    else:
+        compressor1 = compressor
 
-    if ('scale_factor' in enc) or ('add_offset' in enc) or ('calendar' in enc):
+    ds = hdf.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=encoding['dtype'], fillvalue=fillvalue, **compressor1)
+
+    if ds.chunks is None:
+        ds[()] = xr_dataset[var_name].copy().load().values
+
+    elif ('scale_factor' in enc) or ('add_offset' in enc) or ('calendar' in enc):
         if ds.chunks == shape:
             ds[:] = utils.encode_data(xr_dataset[var_name].copy().load().values, **enc)
         else:
@@ -228,7 +244,15 @@ def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None, 
                 if var_name in chunks:
                     chunks1 = chunks[var_name]
 
-            ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[var_name]['dtype'], fillvalue=vars_dict[var_name]['fillvalue'], **compressor)
+            if len(shape) == 0:
+                chunks1 = None
+                compressor1 = {}
+                vars_dict[var_name]['fillvalue'] = None
+                maxshape = None
+            else:
+                compressor1 = compressor
+
+            ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[var_name]['dtype'], fillvalue=vars_dict[var_name]['fillvalue'], **compressor1)
 
             ds_dims = ds.dims
             for i, dim in enumerate(dims):
@@ -245,21 +269,24 @@ def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None, 
                         f1 = f
     
                     ds_old = f1[var_name]
-    
-                    source_slice_index = vars_dict[var_name]['data'][path]['slice_index']
-                    dims_order = vars_dict[var_name]['data'][path]['dims_order']
-    
-                    source_dim_index = [dims_order.index(dim) for dim in dims]
-                    source_slice_index = tuple(source_slice_index[i] for i in source_dim_index)
-    
-                    new_slices, source_slices = utils.copy_chunks_complex(shape, chunks1, source_slice_index, source_dim_index)
-    
-                    for new_slice, source_slice in zip(new_slices, source_slices):
-                        # print(new_slice, source_slice)
-                        if dims == dims_order:
-                            ds[new_slice] = ds_old[source_slice]
-                        else:
-                            ds[new_slice] = ds_old[source_slice].transpose(source_dim_index)
+
+                    if ds.chunks is None:
+                        ds[()] = ds_old[()]
+                    else:
+                        source_slice_index = vars_dict[var_name]['data'][path]['slice_index']
+                        dims_order = vars_dict[var_name]['data'][path]['dims_order']
+        
+                        source_dim_index = [dims_order.index(dim) for dim in dims]
+                        source_slice_index = tuple(source_slice_index[i] for i in source_dim_index)
+        
+                        new_slices, source_slices = utils.copy_chunks_complex(shape, chunks1, source_slice_index, source_dim_index)
+        
+                        for new_slice, source_slice in zip(new_slices, source_slices):
+                            # print(new_slice, source_slice)
+                            if dims == dims_order:
+                                ds[new_slice] = ds_old[source_slice]
+                            else:
+                                ds[new_slice] = ds_old[source_slice].transpose(source_dim_index)
     
                     # for chunk in ds.iter_chunks(slice_index):
                     #     # print(chunk)
