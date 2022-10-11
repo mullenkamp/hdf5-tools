@@ -1,5 +1,5 @@
 {% set name = "hdf5tools" %}
-{% set version = "0.0.6" %}
+{% set version = "0.0.7" %}
 
 package:
   name: {{ name|lower }}
@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://pypi.io/packages/source/{{ name[0] }}/{{ name }}/hdf5tools-{{ version }}.tar.gz
-  sha256: 0fe67e24398dc23c18446dfe030053bd4d12e0d5a28593e36d24e7afe31dd87f
+  sha256: c378261ed6978a34d8a40ee325a13b61a035749940771a88524e6281438702d6
 
 build:
   noarch: python
@@ -21,8 +21,8 @@ requirements:
   run:
     - python >=3.6
     - xarray
-    - h5py
-    - hdf5plugin
+    - h5py>=3.6.0
+    - hdf5plugin>=3.3.1
     - h5netcdf
     - cftime
 

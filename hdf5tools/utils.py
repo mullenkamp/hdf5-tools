@@ -112,6 +112,15 @@ def is_scale(dataset):
     return check
 
 
+def is_regular_index(arr_index):
+    """
+
+    """
+    reg_bool = np.all(np.diff(arr_index) == 1) or len(arr_index) == 1
+
+    return reg_bool
+
+
 def extend_coords(paths, group=None):
     """
 
@@ -174,12 +183,18 @@ def extend_variables(paths, coords_dict, group=None):
                         dims.append(dim_name)
                         arr_index = np.where(np.isin(coords_dict[dim_name], dim[0][:]))[0]
     
-                        if np.any(np.diff(arr_index) != 1) and len(arr_index) > 1:
-                            slice_index.append(arr_index)
-                        else:
+                        # if np.any(np.diff(arr_index) != 1) and len(arr_index) > 1:
+                        #     slice_index.append(arr_index)
+                        # else:
+                        #     slice1 = slice(arr_index.min(), arr_index.max() + 1)
+                        #     slice_index.append(slice1)
+
+                        if is_regular_index(arr_index):
                             slice1 = slice(arr_index.min(), arr_index.max() + 1)
                             slice_index.append(slice1)
-    
+                        else:
+                            slice_index.append(arr_index)
+
                     if ds_name in vars_dict:
                         if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
                             raise ValueError('dims are not consistant between the same named datasets.')
@@ -217,7 +232,7 @@ def index_coords(hdf_path: str, selection: dict, group: str = None):
         
         for coord, sel in selection.items():
             if coord not in coords_list:
-                raise ValueError(coord + ' is not in the coordiantes of the hdf5 file.')
+                raise ValueError(coord + ' is not in the coordinates of the hdf5 file.')
         
             attrs = dict(f1[coord].attrs)
             enc = {k: v for k, v in attrs.items() if k in decode_data.__code__.co_varnames}
@@ -250,8 +265,9 @@ def index_coords(hdf_path: str, selection: dict, group: str = None):
         
             int_index = np.where(bool_index)[0]
             slice_index = slice(int_index.min(), int_index.max())
+            len1 = slice_index.stop - slice_index.start
         
-            index_coords_dict[coord] = {'bool_index': bool_index, 'int_index': int_index, 'slice_index': slice_index}
+            index_coords_dict[coord] = {'int_index': int_index, 'slice_index': slice_index, 'slice_len': len1}
 
     return index_coords_dict
 

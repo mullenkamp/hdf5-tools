@@ -10,7 +10,7 @@ here = os.path.abspath(os.path.dirname(__file__))
 name = 'hdf5tools'
 main_package = 'hdf5tools'
 datasets = 'datasets'
-version = '0.0.6'
+version = '0.0.7'
 descrip = 'Python hdf5 tools'
 
 # The below code is for readthedocs. To have sphinx/readthedocs interact with
@@ -19,7 +19,7 @@ descrip = 'Python hdf5 tools'
 if os.environ.get('READTHEDOCS', False) == 'True':
     INSTALL_REQUIRES = []
 else:
-    INSTALL_REQUIRES = ['xarray', 'h5py', 'hdf5plugin', 'h5netcdf', 'cftime']
+    INSTALL_REQUIRES = ['xarray', 'h5py>=3.6.0', 'hdf5plugin>=3.3.1', 'h5netcdf', 'cftime']
 
 # Get the long description from the README file
 with open(os.path.join(here, 'README.rst'), encoding='utf-8') as f:
