@@ -16,10 +16,10 @@ build:
 
 requirements:
   host:
-    - python >=3.6
+    - python >=3.8
     - pip
   run:
-    - python >=3.6
+    - python >=3.8
     - xarray
     - h5py>=3.6.0
     - hdf5plugin>=3.3.1
