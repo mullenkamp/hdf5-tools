@@ -37,8 +37,8 @@ requirements:
   run:
     - python
     - xarray
-    - h5py>=3.6.0
-    - hdf5plugin>=3.3.1
+    - h5py >=3.6.0
+    - hdf5plugin >=3.3.1
     - h5netcdf
     - cftime
 
