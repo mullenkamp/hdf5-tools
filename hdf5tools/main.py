@@ -16,6 +16,8 @@ import cftime
 # import utils
 from hdf5tools import utils
 import hdf5plugin
+from typing import Union
+import pathlib
 
 
 ##############################################
@@ -336,7 +338,18 @@ def load_dataset(path, **kwargs):
     return ds
 
 
+###################################################
+### Class
 
+
+class H5(object):
+    """
+
+    """
+    def __init__(self, data: Union[str, pathlib.Path, xr.Dataset]):
+        """
+
+        """
 
 
 

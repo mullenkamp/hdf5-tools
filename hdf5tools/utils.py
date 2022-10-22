@@ -5,10 +5,12 @@ Created on Fri Sep 30 19:52:08 2022
 
 @author: mike
 """
+import io
+import pathlib
 import h5py
 import os
 import numpy as np
-# import xarray as xr
+import xarray as xr
 # from time import time
 # from datetime import datetime
 import cftime
@@ -121,96 +123,155 @@ def is_regular_index(arr_index):
     return reg_bool
 
 
-def extend_coords(paths, group=None):
+def open_file(path, group=None):
+    """
+
+    """
+    if isinstance(path, (str, pathlib.Path)):
+        if isinstance(group, str):
+            f = h5py.File(path, 'r')[group]
+        else:
+            f = h5py.File(path, 'r')
+    elif isinstance(path, h5py.File):
+        if isinstance(group, str):
+            try:
+                f = path[group]
+            except:
+                f = path
+        else:
+            f = path
+    elif isinstance(path, xr.Dataset):
+        f = path
+    else:
+        raise TypeError('path must be a str/pathlib path to an HDF5 file, an h5py.File, or an xarray Dataset.')
+
+    return f
+
+
+def open_files(paths, group=None):
+    """
+
+    """
+    files = []
+    append = files.append
+    for path in paths:
+        f = open_file(path, group)
+        append(f)
+
+    return files
+
+
+def close_files(files):
+    """
+    
+    """
+    for f in files:
+        f.close()
+        if isinstance(f, xr.Dataset):
+            del f
+
+
+def extend_coords_xr(coords_dict, file):
+    """
+
+    """
+    ds_list = list(file.data_vars)
+
+    for ds_name in ds_list:
+        ds = file[ds_name]
+
+        if ds.dtype.name == 'object':
+            if ds_name in coords_dict:
+                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds.data).astype(h5py.string_dtype())
+            else:
+                coords_dict[ds_name] = ds.data.astype(h5py.string_dtype())
+        else:
+            if ds_name in coords_dict:
+                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds.data)
+            else:
+                coords_dict[ds_name] = ds.data
+
+
+def extend_coords_hdf5(coords_dict, file):
+    """
+
+    """
+    ds_list = list(file.keys())
+
+    for ds_name in ds_list:
+        if is_scale(file[ds_name]):
+            ds = file[ds_name]
+
+            if ds.dtype.name == 'object':
+                if ds_name in coords_dict:
+                    coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds[:]).astype(h5py.string_dtype())
+                else:
+                    coords_dict[ds_name] = ds[:].astype(h5py.string_dtype())
+            else:
+                if ds_name in coords_dict:
+                    coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds[:])
+                else:
+                    coords_dict[ds_name] = ds[:]
+
+
+def extend_coords(files):
     """
 
     """
     coords_dict = {}
 
-    for path in paths:
-        with h5py.File(path, 'r') as f:
-
-            if isinstance(group, str):
-                f1 = f[group]
-            else:
-                f1 = f
-    
-            ds_list = list(f1.keys())
-    
-            for ds_name in ds_list:
-                if is_scale(f1[ds_name]):
-                    ds = f1[ds_name]
-    
-                    if ds.dtype.name == 'object':
-                        if ds_name in coords_dict:
-                            coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds[:]).astype(h5py.string_dtype())
-                        else:
-                            coords_dict[ds_name] = ds[:].astype(h5py.string_dtype())
-                    else:
-                        if ds_name in coords_dict:
-                            coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds[:])
-                        else:
-                            coords_dict[ds_name] = ds[:]
+    for file in files:
+        if isinstance(file, xr.Dataset):
+            extend_coords_xr(coords_dict, file)
+        else:
+            extend_coords_hdf5(coords_dict, file)
 
     return coords_dict
 
 
-def extend_variables(paths, coords_dict, group=None):
+def extend_variables(files, coords_dict):
     """
-
+    Need to use some kind of id for each file object...or I just log the position in the file list...probably easier...
     """
     vars_dict = {}
 
-    for path in paths:
-        with h5py.File(path, 'r') as f:
+    for i, file in enumerate(files):
+        ds_list = list(file.keys())
 
-            if isinstance(group, str):
-                f1 = f[group]
-            else:
-                f1 = f
-    
-            ds_list = list(f1.keys())
-    
-            for ds_name in ds_list:
-                if not is_scale(f1[ds_name]):
-                    ds = f1[ds_name]
-    
-                    dims = []
-                    slice_index = []
-    
-                    for dim in ds.dims:
-                        dim_name = dim[0].name.split('/')[-1]
-                        dims.append(dim_name)
-                        arr_index = np.where(np.isin(coords_dict[dim_name], dim[0][:]))[0]
-    
-                        # if np.any(np.diff(arr_index) != 1) and len(arr_index) > 1:
-                        #     slice_index.append(arr_index)
-                        # else:
-                        #     slice1 = slice(arr_index.min(), arr_index.max() + 1)
-                        #     slice_index.append(slice1)
+        for ds_name in ds_list:
+            if not is_scale(file[ds_name]):
+                ds = file[ds_name]
 
-                        if is_regular_index(arr_index):
-                            slice1 = slice(arr_index.min(), arr_index.max() + 1)
-                            slice_index.append(slice1)
-                        else:
-                            slice_index.append(arr_index)
+                dims = []
+                slice_index = []
 
-                    if ds_name in vars_dict:
-                        if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
-                            raise ValueError('dims are not consistant between the same named datasets.')
-                        if vars_dict[ds_name]['dtype'] != ds.dtype:
-                            raise ValueError('dtypes are not consistant between the same named datasets.')
-    
-                        vars_dict[ds_name]['data'][path] = {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}
+                for dim in ds.dims:
+                    dim_name = dim[0].name.split('/')[-1]
+                    dims.append(dim_name)
+                    arr_index = np.where(np.isin(coords_dict[dim_name], dim[0][:]))[0]
+
+                    if is_regular_index(arr_index):
+                        slice1 = slice(arr_index.min(), arr_index.max() + 1)
+                        slice_index.append(slice1)
                     else:
-                        shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
-    
-                        if isinstance(ds.dtype, np.number):
-                            fillvalue = ds.fillvalue
-                        else:
-                            fillvalue = None
-    
-                        vars_dict[ds_name] = {'data': {path: {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}}, 'dims': tuple(dims), 'shape': shape, 'dtype': ds.dtype, 'fillvalue': fillvalue}
+                        slice_index.append(arr_index)
+
+                if ds_name in vars_dict:
+                    if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
+                        raise ValueError('dims are not consistant between the same named datasets.')
+                    if vars_dict[ds_name]['dtype'] != ds.dtype:
+                        raise ValueError('dtypes are not consistant between the same named datasets.')
+
+                    vars_dict[ds_name]['data'][i] = {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}
+                else:
+                    shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
+
+                    if isinstance(ds.dtype, np.number):
+                        fillvalue = ds.fillvalue
+                    else:
+                        fillvalue = None
+
+                    vars_dict[ds_name] = {'data': {i: {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}}, 'dims': tuple(dims), 'shape': shape, 'dtype': ds.dtype, 'fillvalue': fillvalue}
 
     return vars_dict
 
