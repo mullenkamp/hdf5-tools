@@ -33,6 +33,8 @@ time_str_conversion = {'days': 'datetime64[D]',
                        'seconds': 'datetime64[s]',
                        'milliseconds': 'datetime64[ms]'}
 
+enc_fields = ('units', 'calendar', 'dtype', 'missing_value', '_FillValue', 'add_offset', 'scale_factor')
+
 #########################################################
 ### Functions
 
@@ -69,7 +71,7 @@ def decode_datetime(data, units=None, calendar='gregorian'):
     return output
 
 
-def encode_data(data, dtype, missing_value=None, add_offset=0, scale_factor=1, units=None, calendar=None, **kwargs):
+def encode_data(data, dtype, missing_value=None, add_offset=0, scale_factor=None, units=None, calendar=None, **kwargs):
     """
 
     """
@@ -77,10 +79,9 @@ def encode_data(data, dtype, missing_value=None, add_offset=0, scale_factor=1, u
         if (calendar is None):
             raise TypeError('data is datetime, so calendar must be assigned.')
         output = encode_datetime(data, units, calendar)
-    else:
-        if dtype == h5py.string_dtype():
-            data = data.astype(h5py.string_dtype())
-
+    elif dtype == h5py.string_dtype():
+        output = data.astype(h5py.string_dtype())
+    elif isinstance(scale_factor, (int, float, np.number)):
         output = (data - add_offset)/scale_factor
 
         if isinstance(missing_value, (int, np.number)):
@@ -91,33 +92,51 @@ def encode_data(data, dtype, missing_value=None, add_offset=0, scale_factor=1, u
     return output
 
 
-def get_xr_encoding(xr_array):
+def get_encoding(data):
     """
 
     """
-    encoding = xr_array.encoding.copy()
+    if isinstance(data, xr.DataArray):
+        encoding = {f: v for f, v in data.encoding.items() if f in enc_fields}
+    else:
+        encoding = {f: v for f, v in data.attrs.items() if f in enc_fields}
 
-    if (xr_array.dtype.name == 'object') or ('str' in xr_array.dtype.name):
+    if (data.dtype.name == 'object') or ('str' in data.dtype.name):
         encoding['dtype'] = h5py.string_dtype()
-    elif 'datetime64' in xr_array.dtype.name:
+    elif ('datetime64' in data.dtype.name) or ('calendar' in encoding):
         encoding['dtype'] = np.dtype('int64')
         encoding['calendar'] = 'gregorian'
+        encoding['units'] = 'seconds since 1970-01-01 00:00:00'
 
     if 'dtype' not in encoding:
-        encoding['dtype'] = xr_array.dtype
+        encoding['dtype'] = data.dtype
     elif isinstance(encoding['dtype'], str):
         encoding['dtype'] = np.dtype(encoding['dtype'])
 
-    if 'calendar' in encoding:
-        encoding['units'] = 'seconds since 1970-01-01 00:00:00'
-
     if 'missing_value' in encoding:
         encoding['_FillValue'] = encoding['missing_value']
-        fillvalue = encoding['missing_value']
-    else:
-        fillvalue = None
 
-    return encoding, fillvalue
+    return encoding
+
+
+def get_encodings(files):
+    """
+    I should add checking across the files for conflicts at some point.
+    """
+    # file_encs = {}
+    encs = {}
+    for i, file in enumerate(files):
+        # file_encs[i] = {}
+        for name in file:
+            enc = get_encoding(file[name])
+            # file_encs[i].update({name: enc})
+
+            if name in encs:
+                encs[name].update(enc)
+            else:
+                encs[name] = enc
+
+    return encs
 
 
 def decode_data(data, dtype=None, missing_value=None, add_offset=0, scale_factor=1, units=None, calendar=None, **kwargs):
@@ -201,6 +220,7 @@ def close_files(files):
         f.close()
         if isinstance(f, xr.Dataset):
             del f
+            xr.backends.file_manager.FILE_CACHE.clear()
 
 
 def extend_coords_xr(coords_dict, file):
@@ -214,14 +234,14 @@ def extend_coords_xr(coords_dict, file):
 
         if ds.dtype.name == 'object':
             if ds_name in coords_dict:
-                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds.data).astype(h5py.string_dtype())
+                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds.values).astype(h5py.string_dtype())
             else:
-                coords_dict[ds_name] = ds.data.astype(h5py.string_dtype())
+                coords_dict[ds_name] = ds.values.astype(h5py.string_dtype())
         else:
             if ds_name in coords_dict:
-                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds.data)
+                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds.values)
             else:
-                coords_dict[ds_name] = ds.data
+                coords_dict[ds_name] = ds.values
 
 
 def extend_coords_hdf5(coords_dict, file):
