@@ -13,12 +13,12 @@ import xarray as xr
 import cftime
 # import dateutil.parser as dparser
 # import numcodecs
-# import utils
-from hdf5tools import utils
+import utils
+# from hdf5tools import utils
 import hdf5plugin
 from typing import Union, List
 import pathlib
-
+import copy
 
 ##############################################
 ### Parameters
@@ -35,50 +35,304 @@ import pathlib
 
 class H5(object):
     """
+    Class to load combine one more HDF5 data files (or xarray datasets) with optional filters. The class will then export the combined data to an HDF5 file, file object, or xr.Dataset.
 
+    Parameters
+    ----------
+    data : str, pathlib.Path, io.BytesIO, xr.Dataset, or list of str, pathlib.Path, io.BytesIO, xr.Dataset
+        The input data need to either be a path to HDF5 file(s), BytesIO objects, or xr.Datasets (or some combo of those).
+    group : str or None
+        The group or group path within the hdf5 file(s) to the datasets.
+    
+    Returns
+    -------
+    H5 instance
     """
     def __init__(self, data: Union[List[Union[str, pathlib.Path, io.BytesIO, xr.Dataset]], Union[str, pathlib.Path, io.BytesIO, xr.Dataset]], group=None):
         """
+        Class to load combine one more HDF5 data files (or xarray datasets) with optional filters. The class will then export the combined data to an HDF5 file, file object, or xr.Dataset.
 
+        Parameters
+        ----------
+        data : str, pathlib.Path, io.BytesIO, xr.Dataset, or list of str, pathlib.Path, io.BytesIO, xr.Dataset
+            The input data need to either be a path to HDF5 file(s), BytesIO objects, or xr.Datasets (or some combo of those).
+        group : str or None
+            The group or group path within the hdf5 file(s) to the datasets.
+        
+        Returns
+        -------
+        H5 instance
         """
         ## Read paths input into the appropriate file objects
-        files = utils.open_files(data, group)
+        if isinstance(data, list):
+            data1 = data
+        else:
+            data1 = [data]
+
+        files = utils.open_files(data1, group)
 
         ## Get encodings
         encodings = utils.get_encodings(files)
 
+        ## Get attrs
+        attrs, global_attrs = utils.get_attrs(files)
+
         ## Get the extended coords
-        coords_dict = utils.extend_coords(files)
+        coords_dict = utils.extend_coords(files, encodings)
 
         ## Add the variables as datasets
-        vars_dict = utils.extend_variables(files, coords_dict)
+        vars_dict = utils.index_variables(files, coords_dict, encodings)
+
+        ## Close files
+        utils.close_files(files)
 
         ## Assign attributes
-        self._files = files
+        self._files = data1
+        self._group = group
         self._coords_dict = coords_dict
         self._data_vars_dict = vars_dict
+        self._attrs = attrs
+        self._global_attrs = global_attrs
+        self._encodings = encodings
+
+
+    def _build_empty_ds(self):
+        """
+
+        """
+        if self._data_vars_dict:
+
+            ## get all of the coords associated with the existing data vars
+            all_data_coords = set()
+            for ds in self._data_vars_dict:
+                for dim in self._data_vars_dict[ds]['dims']:
+                    all_data_coords.add(dim)
+
+            ## Create empty xr.Dataset
+            xr_ds = xr.Dataset(data_vars={k: (v['dims'], np.empty(v['shape'], dtype=v['dtype_decoded'])) for k, v in self._data_vars_dict.items()}, coords={k: v for k, v in self._coords_dict.items() if k in all_data_coords}, attrs=self._global_attrs)
+            for ds_name, attr in self._attrs.items():
+                xr_ds[ds_name].attrs = attr
+            for ds_name, enc in self._encodings.items():
+                xr_ds[ds_name].encoding = enc
+
+        else:
+            xr_ds = xr.Dataset()
+
+        return xr_ds
 
 
     def __repr__(self):
         """
 
         """
+        xr_ds = self._build_empty_ds()
 
-        # if hasattr(self, '_empty_ds'):
+        return xr_ds.__repr__()
 
 
+    def sel(self, selection: dict=None, include: list=None, exclude: list=None):
+        """
+        Filter the data by a selection, include, and exclude. Returns a new H5 instance. The selection parameter is very similar to xarry's .sel method.
+
+        Parameters
+        ----------
+        selection : dict
+            This filter requires a dict of coordinates to three different types of filter values. These include slice instances (the best and preferred option), a list/np.ndarray of coordinate values, or a bool np.ndarray of the coordinate data length.
+        include : list
+            A list of data variables to include in the output. If both include and exclude parameters are passed, only include will be...included...
+        exclude : list
+            A list of data variables to exclude from the output.
+        """
+        c = self.copy()
+        if selection is not None:
+            files = utils.open_files(self._files, self._group)
+            utils.filter_coords(files, c._coords_dict, selection)
+            vars_dict = utils.index_variables(files, c._coords_dict, c._encodings)
+
+            c._data_vars_dict = vars_dict
+
+            ## Close files
+            utils.close_files(files)
+
+        if include is not None:
+            # for var_name in include:
+            #     if var_name not in c._data_vars_dict:
+            #         raise ValueError(var_name + ' is not a variable in the data.')
+            c._data_vars_dict = {k: v for k, v in c._data_vars_dict if k in include}
+
+        elif exclude is not None:
+            # for var_name in exclude:
+            #     if var_name not in c._data_vars_dict:
+            #         raise ValueError(var_name + ' is not a variable in the data.')
+            c._data_vars_dict = {k: v for k, v in c._data_vars_dict if k not in exclude}
+
+        return c
 
 
-    def close(self):
+    def copy(self):
         """
 
         """
-        utils.close_files(self._files)
+        c = copy.deepcopy(self)
+
+        return c
 
 
+    def to_hdf5(self, output: Union[str, pathlib.Path, io.BytesIO] = None, group=None, chunks=None, unlimited_dims=None, compression='zstd'):
+        """
+        Method to output the filtered data to an HDF5 file or file object.
+    
+        Parameters
+        ----------
+        output : str, pathlib.Path, or io.BytesIO
+            The output path of the new combined hdf5 file.
+        group : str or None
+            The group or group path within the hdf5 file to save the datasets.
+        chunks : dict of tuples
+            The chunks per dataset. Must be a dictionary of dataset names with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
+        unlimited_dims : str, list of str, or None
+            The dimensions/coordinates that should be assigned as "unlimited".
+        compression : str
+            The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None.
+    
+        Returns
+        -------
+        None
+        """
+        if isinstance(unlimited_dims, str):
+            unlimited_dims = [unlimited_dims]
+        else:
+            unlimited_dims = []
+    
+        compressor = utils.get_compressor(compression)
+
+        files = utils.open_files(self._files, self._group)
+
+        ## Create new file
+        with h5py.File(output, 'w', libver='latest', rdcc_nbytes=3*1024*1024) as nf:
+
+            if isinstance(group, str):
+                nf1 = nf.create_group(group)
+            else:
+                nf1 = nf
+
+            ## Add the coords as datasets
+            for coord, arr in self._coords_dict.items():
+                enc_arr = utils.encode_data(arr, **self._encodings[coord])
+                shape = enc_arr.shape
+
+                maxshape = tuple([s if s not in unlimited_dims else None for s in shape])
+
+                chunks1 = utils.guess_chunk(shape, maxshape, enc_arr.dtype)
+
+                if isinstance(chunks, dict):
+                    if coord in chunks:
+                        chunks1 = chunks[coord]
+
+                ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=enc_arr.dtype, **compressor)
+
+                ds[:] = enc_arr
+
+                ds.make_scale(coord)
+
+            ## Add the variables as datasets
+            vars_dict = copy.deepcopy(self._data_vars_dict)
+
+            for var_name in vars_dict:
+                shape = vars_dict[var_name]['shape']
+                dims = vars_dict[var_name]['dims']
+                maxshape = tuple([s if dims[i] not in unlimited_dims else None for i, s in enumerate(shape)])
+
+                chunks1 = utils.guess_chunk(shape, maxshape, vars_dict[var_name]['dtype'])
+
+                if isinstance(chunks, dict):
+                    if var_name in chunks:
+                        chunks1 = chunks[var_name]
+
+                if len(shape) == 0:
+                    chunks1 = None
+                    compressor1 = {}
+                    vars_dict[var_name]['fillvalue'] = None
+                    maxshape = None
+                else:
+                    compressor1 = compressor
+
+                ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[var_name]['dtype'], fillvalue=vars_dict[var_name]['fillvalue'], **compressor1)
+
+                ds_dims = ds.dims
+                for i, dim in enumerate(dims):
+                    ds_dims[i].attach_scale(nf1[dim])
+                    ds_dims[i].label = dim
+
+                # Load the data by file
+                for i in vars_dict[var_name]['data']:
+                    file = files[i]
+        
+                    ds_old = file[var_name]
+
+                    if ds.chunks is None:
+                        if isinstance(ds_old, xr.Dataset):
+                            ds[()] = ds_old.values
+                        else:
+                            ds[()] = ds_old[()]
+                    else:
+                        global_index = vars_dict[var_name]['data'][i]['global_index']
+                        local_index = vars_dict[var_name]['data'][i]['local_index']
+                        dims_order = vars_dict[var_name]['data'][i]['dims_order']
+                        local_dims = tuple(dims[dims_order.index(i)] for i in range(len(dims_order)))
+        
+                        global_chunks, local_chunks = utils.index_chunks(shape, chunks1, global_index, local_index, dims_order)
+
+                        if isinstance(ds_old, xr.Dataset):
+                            for global_chunk, local_chunk in zip(global_chunks, local_chunks):
+                                data = ds_old[local_chunk].copy().load()
+
+                                if dims == local_dims:
+                                    ds[global_chunk] = data.values
+                                else:
+                                    ds[global_chunk] = data.values.transpose(dims_order)
+                                data.close()
+                                del data
+                        else:
+                            for global_chunk, local_chunk in zip(global_chunks, local_chunks):
+                                if dims == local_dims:
+                                    ds[global_chunk] = ds_old[local_chunk]
+                                else:
+                                    ds[global_chunk] = ds_old[local_chunk].transpose(dims_order)
+
+            ## Assign attrs
+            for ds_name, attr in self._attrs.items():
+                nf1[ds_name].attrs.update(attr)
+
+            for ds_name, encs in self._encodings.items():
+                for f, enc in encs.items():
+                    if 'dtype' in f:
+                        enc = enc.name
+                    nf1[ds_name].attrs.update({f: enc})
+
+            nf1.attrs.update(self._global_attrs)
+
+        if isinstance(output, io.BytesIO):
+            output.seek(0)
+
+        utils.close_files(files)
 
 
+    def to_xarray(self):
+        """
+        Save an HDF5 file to an io.BytesIO object which is then opened by xr.open_dataset using the h5netcf engine.
 
+        Returns
+        -------
+        xr.Dataset
+        """
+        b1 = io.BytesIO()
+
+        self.to_hdf5(b1)
+
+        xr_ds = xr.open_dataset(b1, engine='h5netcdf')
+
+        return xr_ds
 
 
 

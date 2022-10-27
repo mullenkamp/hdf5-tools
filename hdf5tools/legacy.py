@@ -66,26 +66,21 @@ def decode_datetime(data, units=None, calendar='gregorian'):
     return output
 
 
-def encode_data(data, dtype, missing_value=None, add_offset=0, scale_factor=1, units=None, calendar=None, **kwargs):
+def encode_data(data, dtype, missing_value=None, add_offset=0, scale_factor=None, units=None, calendar=None, **kwargs):
     """
 
     """
     if 'datetime64' in data.dtype.name:
-        if (calendar is None):
-            raise TypeError('data is datetime, so calendar must be assigned.')
-        output = encode_datetime(data, units, calendar)
-    else:
-        if dtype == h5py.string_dtype():
-            data = data.astype(h5py.string_dtype())
-
-        output = (data - add_offset)/scale_factor
+        data = encode_datetime(data, units, calendar)
+    elif isinstance(scale_factor, (int, float, np.number)):
+        data = (data - add_offset)/scale_factor
 
         if isinstance(missing_value, (int, np.number)):
-            output[np.isnan(output)] = missing_value
+            data[np.isnan(data)] = missing_value
 
-        output = output.astype(dtype)
+    data = data.astype(dtype)
 
-    return output
+    return data
 
 
 def get_xr_encoding(xr_array):

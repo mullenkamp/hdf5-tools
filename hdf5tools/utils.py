@@ -35,6 +35,8 @@ time_str_conversion = {'days': 'datetime64[D]',
 
 enc_fields = ('units', 'calendar', 'dtype', 'missing_value', '_FillValue', 'add_offset', 'scale_factor')
 
+missing_value_dict = {'int8': -128, 'int16': -32768, 'int32': -2147483648, 'int64': -9223372036854775800}
+
 #########################################################
 ### Functions
 
@@ -76,20 +78,39 @@ def encode_data(data, dtype, missing_value=None, add_offset=0, scale_factor=None
 
     """
     if 'datetime64' in data.dtype.name:
-        if (calendar is None):
-            raise TypeError('data is datetime, so calendar must be assigned.')
-        output = encode_datetime(data, units, calendar)
-    elif dtype == h5py.string_dtype():
-        output = data.astype(h5py.string_dtype())
+        data = encode_datetime(data, units, calendar)
+
     elif isinstance(scale_factor, (int, float, np.number)):
-        output = (data - add_offset)/scale_factor
+        data = (data - add_offset)/scale_factor
 
         if isinstance(missing_value, (int, np.number)):
-            output[np.isnan(output)] = missing_value
+            data[np.isnan(data)] = missing_value
 
-        output = output.astype(dtype)
+    if (data.dtype != dtype) or (data.dtype.name == 'object'):
+        data = data.astype(dtype)
 
-    return output
+    return data
+
+
+def decode_data(data, dtype_decoded, missing_value=None, add_offset=0, scale_factor=None, units=None, calendar=None, **kwargs):
+    """
+
+    """
+    if isinstance(calendar, str):
+        data = decode_datetime(data, units, calendar)
+
+    elif isinstance(scale_factor, (int, float, np.number)):
+        data = data.astype(dtype_decoded)
+
+        if isinstance(missing_value, (int, np.number)):
+            data[data == missing_value] = np.nan
+
+        data = (data * scale_factor) + add_offset
+
+    elif (data.dtype != dtype_decoded) or (data.dtype.name == 'object'):
+        data = data.astype(dtype_decoded)
+
+    return data
 
 
 def get_encoding(data):
@@ -103,18 +124,43 @@ def get_encoding(data):
 
     if (data.dtype.name == 'object') or ('str' in data.dtype.name):
         encoding['dtype'] = h5py.string_dtype()
+        encoding['dtype_decoded'] = encoding['dtype']
     elif ('datetime64' in data.dtype.name) or ('calendar' in encoding):
         encoding['dtype'] = np.dtype('int64')
         encoding['calendar'] = 'gregorian'
         encoding['units'] = 'seconds since 1970-01-01 00:00:00'
+        encoding['dtype_decoded'] = np.dtype('datetime64[s]')
+        encoding['missing_value'] = missing_value_dict['int64']
 
     if 'dtype' not in encoding:
         encoding['dtype'] = data.dtype
     elif isinstance(encoding['dtype'], str):
         encoding['dtype'] = np.dtype(encoding['dtype'])
 
+    if 'scale_factor' in encoding:
+        if not isinstance(encoding['scale_factor'], (int, float, np.number)):
+            raise TypeError('scale_factor must be an int or float.')
+
+        if not np.issubdtype(encoding['dtype'], np.integer):
+            raise TypeError('If scale_factor is assigned, then the dtype must be a np.integer.')
+
+        if isinstance(encoding['scale_factor'], (int, np.integer)):
+            encoding['dtype_decoded'] = np.dtype('float32')
+        elif encoding['dtype'].itemsize > 2:
+            encoding['dtype_decoded'] = np.dtype('float64')
+        else:
+            encoding['dtype_decoded'] = np.dtype('float32')
+
+        if 'missing_value' not in encoding:
+            encoding['missing_value'] = missing_value_dict[encoding['dtype'].name]
+
+    if 'dtype_decoded' not in encoding:
+        encoding['dtype_decoded'] = encoding['dtype']
+
     if 'missing_value' in encoding:
         encoding['_FillValue'] = encoding['missing_value']
+    if ('_FillValue' in encoding) and ('missing_value' not in encoding):
+        encoding['missing_value'] = encoding['_FillValue']
 
     return encoding
 
@@ -127,7 +173,12 @@ def get_encodings(files):
     encs = {}
     for i, file in enumerate(files):
         # file_encs[i] = {}
-        for name in file:
+        if isinstance(file, xr.Dataset):
+            ds_list = list(file.variables)
+        else:
+            ds_list = list(file.keys())
+
+        for name in ds_list:
             enc = get_encoding(file[name])
             # file_encs[i].update({name: enc})
 
@@ -139,21 +190,27 @@ def get_encodings(files):
     return encs
 
 
-def decode_data(data, dtype=None, missing_value=None, add_offset=0, scale_factor=1, units=None, calendar=None, **kwargs):
+def get_attrs(files):
     """
 
     """
-    if isinstance(calendar, str):
-        output = decode_datetime(data, units, calendar)
-    else:
-        output = data.astype(dtype)
+    # file_attrs = {}
+    global_attrs = {}
+    attrs = {}
+    for i, file in enumerate(files):
+        global_attrs.update(dict(file.attrs))
 
-        if isinstance(missing_value, (int, np.number)):
-            output[output == missing_value] = np.nan
-
-        output = (output * scale_factor) + add_offset
-
-    return output
+        # file_attrs[i] = {}
+        for name in file:
+            attr = {f: v for f, v in file[name].attrs.items() if (f not in enc_fields) and (f not in ['DIMENSION_LABELS', 'DIMENSION_LIST', 'CLASS', 'NAME', '_Netcdf4Coordinates', '_Netcdf4Dimid', 'REFERENCE_LIST'])}
+            # file_attrs[i].update({name: attr})
+    
+            if name in attrs:
+                attrs[name].update(attr)
+            else:
+                attrs[name] = attr
+    
+    return attrs, global_attrs
 
 
 def is_scale(dataset):
@@ -223,49 +280,7 @@ def close_files(files):
             xr.backends.file_manager.FILE_CACHE.clear()
 
 
-def extend_coords_xr(coords_dict, file):
-    """
-
-    """
-    ds_list = list(file.coords)
-
-    for ds_name in ds_list:
-        ds = file[ds_name]
-
-        if ds.dtype.name == 'object':
-            if ds_name in coords_dict:
-                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds.values).astype(h5py.string_dtype())
-            else:
-                coords_dict[ds_name] = ds.values.astype(h5py.string_dtype())
-        else:
-            if ds_name in coords_dict:
-                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds.values)
-            else:
-                coords_dict[ds_name] = ds.values
-
-
-def extend_coords_hdf5(coords_dict, file):
-    """
-
-    """
-    ds_list = [ds_name for ds_name in file.keys() if is_scale(file[ds_name])]
-
-    for ds_name in ds_list:
-        ds = file[ds_name]
-
-        if ds.dtype.name == 'object':
-            if ds_name in coords_dict:
-                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds[:]).astype(h5py.string_dtype())
-            else:
-                coords_dict[ds_name] = ds[:].astype(h5py.string_dtype())
-        else:
-            if ds_name in coords_dict:
-                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], ds[:])
-            else:
-                coords_dict[ds_name] = ds[:]
-
-
-def extend_coords(files):
+def extend_coords(files, encodings):
     """
 
     """
@@ -273,133 +288,192 @@ def extend_coords(files):
 
     for file in files:
         if isinstance(file, xr.Dataset):
-            extend_coords_xr(coords_dict, file)
+            ds_list = list(file.coords)
         else:
-            extend_coords_hdf5(coords_dict, file)
+            ds_list = [ds_name for ds_name in file.keys() if is_scale(file[ds_name])]
+
+        for ds_name in ds_list:
+            ds = file[ds_name]
+
+            if isinstance(file, xr.Dataset):
+                data = decode_data(ds.values, **encodings[ds_name])
+            else:
+                data = decode_data(ds[:], **encodings[ds_name])
+
+            if ds_name in coords_dict:
+                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], data)
+            else:
+                coords_dict[ds_name] = data
 
     return coords_dict
 
 
-def extend_variables_hdf5(file, i, coords_dict, vars_dict):
-    """
-    
-    """
-    ds_list = [ds_name for ds_name in file.keys() if not is_scale(file[ds_name])]
-
-    for ds_name in ds_list:
-        ds = file[ds_name]
-
-        dims = []
-        slice_index = []
-
-        for dim in ds.dims:
-            dim_name = dim[0].name.split('/')[-1]
-            dims.append(dim_name)
-            arr_index = np.where(np.isin(coords_dict[dim_name], dim[0][:]))[0]
-
-            if is_regular_index(arr_index):
-                slice1 = slice(arr_index.min(), arr_index.max() + 1)
-                slice_index.append(slice1)
-            else:
-                slice_index.append(arr_index)
-
-        if ds_name in vars_dict:
-            if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
-                raise ValueError('dims are not consistant between the same named datasets.')
-            if vars_dict[ds_name]['dtype'] != ds.dtype:
-                raise ValueError('dtypes are not consistant between the same named datasets.')
-
-            vars_dict[ds_name]['data'][i] = {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}
-        else:
-            shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
-
-            if isinstance(ds.dtype, np.number):
-                fillvalue = ds.fillvalue
-            else:
-                fillvalue = None
-
-            vars_dict[ds_name] = {'data': {i: {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}}, 'dims': tuple(dims), 'shape': shape, 'dtype': ds.dtype, 'fillvalue': fillvalue}
-
-
-def extend_variables_xr(file, i, coords_dict, vars_dict):
-    """
-    
-    """
-    ds_list = list(file.data_vars)
-
-    for ds_name in ds_list:
-        ds = file[ds_name]
-
-        dims = []
-        slice_index = []
-
-        for dim in ds.dims:
-            dims.append(dim)
-            arr_index = np.where(np.isin(coords_dict[dim], ds[dim].data))[0]
-
-            if is_regular_index(arr_index):
-                slice1 = slice(arr_index.min(), arr_index.max() + 1)
-                slice_index.append(slice1)
-            else:
-                slice_index.append(arr_index)
-
-        if ds_name in vars_dict:
-            if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
-                raise ValueError('dims are not consistant between the same named datasets.')
-            if vars_dict[ds_name]['dtype'] != ds.dtype:
-                raise ValueError('dtypes are not consistant between the same named datasets.')
-
-            vars_dict[ds_name]['data'][i] = {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}
-        else:
-            shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
-
-            if isinstance(ds.dtype, np.number):
-                fillvalue = ds.fillvalue
-            else:
-                fillvalue = None
-
-            vars_dict[ds_name] = {'data': {i: {'dims_order': tuple(dims), 'slice_index': tuple(slice_index)}}, 'dims': tuple(dims), 'shape': shape, 'dtype': ds.dtype, 'fillvalue': fillvalue}
-
-
-def extend_variables(files, coords_dict):
+def index_variables(files, coords_dict, encodings):
     """
     
     """
     vars_dict = {}
 
     for i, file in enumerate(files):
+
         if isinstance(file, xr.Dataset):
-            extend_variables_xr(file, i, coords_dict, vars_dict)
+            ds_list = list(file.data_vars)
         else:
-            extend_variables_hdf5(file, i, coords_dict, vars_dict)
+            ds_list = [ds_name for ds_name in file.keys() if not is_scale(file[ds_name])]
+
+        for ds_name in ds_list:
+            ds = file[ds_name]
+
+            var_enc = encodings[ds_name]
+
+            dims = []
+            global_index = []
+            local_index = []
+            remove_ds = False
+
+            for dim in ds.dims:
+                if isinstance(file, xr.Dataset):
+                    dim_name = dim
+                    dim_data = decode_data(ds[dim_name].values, **encodings[dim_name])
+                else:
+                    dim_name = dim[0].name.split('/')[-1]
+                    dim_data = decode_data(dim[0][:], **encodings[dim_name])
+
+                dims.append(dim_name)
+
+                global_arr_index = np.where(np.isin(coords_dict[dim_name], dim_data))[0]
+                local_arr_index = np.where(np.isin(dim_data, coords_dict[dim_name]))[0]
+
+                if len(global_arr_index) > 0:
+
+                    if is_regular_index(global_arr_index):
+                        slice1 = slice(global_arr_index.min(), global_arr_index.max() + 1)
+                        global_index.append(slice1)
+                    else:
+                        global_index.append(global_arr_index)
+    
+                    if is_regular_index(local_arr_index):
+                        slice1 = slice(local_arr_index.min(), local_arr_index.max() + 1)
+                        local_index.append(slice1)
+                    else:
+                        local_index.append(local_arr_index)
+                else:
+                    remove_ds = True
+                    break
+
+            if remove_ds:
+                if ds_name in vars_dict:
+                    if i in vars_dict[ds_name]['data']:
+                        del vars_dict[ds_name]['data'][i]
+
+            else:
+                dict1 = {'dims_order': tuple(i for i in range(len(dims))), 'global_index': global_index, 'local_index': local_index}
+    
+                if ds_name in vars_dict:
+                    if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
+                        raise ValueError('dims are not consistant between the same named dataset: ' + ds_name)
+                    # if vars_dict[ds_name]['dtype'] != ds.dtype:
+                    #     raise ValueError('dtypes are not consistant between the same named dataset: ' + ds_name)
+
+                    dims_order = [vars_dict[ds_name]['dims'].index(dim) for dim in dims]
+                    dict1['dims_order'] = tuple(dims_order)
+                    dict1['global_index'] = [dict1['global_index'][dims_order.index(i)] for i in range(len(dims_order))]
+                    dict1['local_index'] = [dict1['local_index'][dims_order.index(i)] for i in range(len(dims_order))]
+
+                    vars_dict[ds_name]['data'][i] = dict1
+                else:
+                    shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
+    
+                    if ds.dtype.name == 'object':
+                        fillvalue = None
+                    else:
+                        fillvalue = var_enc['missing_value']
+    
+                    vars_dict[ds_name] = {'data': {i: dict1}, 'dims': tuple(dims), 'shape': shape, 'dtype': var_enc['dtype'], 'fillvalue': fillvalue, 'dtype_decoded': var_enc['dtype_decoded']}
 
     return vars_dict
 
 
-def index_coords_hdf5(file, selection: dict):
+# def index_coords_file(file, coords_dict, encodings, selection: dict):
+#     """
+
+#     """
+#     index_coords_dict = {}
+
+#     for coord in coords_dict:
+#         if coord in selection:
+#             sel = selection[coord]
+
+#             coord_enc = encodings[coord]
+    
+#             if isinstance(file, xr.Dataset):
+#                 arr = decode_data(file[coord].values, **coord_enc)
+#             else:
+#                 arr = decode_data(file[coord][:], **coord_enc)
+    
+#             if isinstance(sel, slice):
+#                 if 'datetime64' in arr.dtype.name:
+#                     if not isinstance(sel.start, (str, np.datetime64)):
+#                         raise TypeError('Input for datetime selection should be either a datetime string or np.datetime64.')
+#                     start = np.datetime64(sel.start, 's')
+#                     end = np.datetime64(sel.stop, 's')
+#                     bool_index = (start <= arr) & (arr < end)
+#                 else:
+#                     bool_index = (sel.start <= arr) & (arr < sel.stop)
+        
+#             else:
+#                 if isinstance(sel, (int, float)):
+#                     sel = [sel]
+        
+#                 try:
+#                     sel1 = np.array(sel)
+#                 except:
+#                     raise TypeError('selection input could not be coerced to an ndarray.')
+        
+#                 if sel1.dtype.name == 'bool':
+#                     if sel1.shape[0] != arr.shape[0]:
+#                         raise ValueError('The boolean array does not have the same length as the coord array.')
+#                     bool_index = sel1
+#                 else:
+#                     bool_index = np.in1d(arr, sel1)
+        
+#             arr_index = np.where(bool_index)[0]
+
+#             if len(arr_index) > 0:
+#                 if is_regular_index(arr_index):
+#                     slice_index = slice(arr_index.min(), arr_index.max() + 1)
+#                 else:
+#                     slice_index = arr_index
+#             else:
+#                 return None
+
+#         else:
+#             slice_index = slice(None, None)
+
+#         index_coords_dict[coord] = slice_index
+
+#     return index_coords_dict
+
+
+def filter_coords(files, coords_dict, selection):
     """
 
     """
-    coords_list = [ds_name for ds_name in file if is_scale(file[ds_name])]
-    
-    index_coords_dict = {}
-    
     for coord, sel in selection.items():
-        if coord not in coords_list:
-            raise ValueError(coord + ' is not in the coordinates of the hdf5 file.')
-    
-        attrs = dict(file[coord].attrs)
-        enc = {k: v for k, v in attrs.items() if k in decode_data.__code__.co_varnames}
-    
-        arr = decode_data(file[coord][:], **enc)
-    
+        if coord not in coords_dict:
+            raise ValueError(coord + ' one of the coordinates.')
+
+        coord_data = coords_dict[coord]
+
         if isinstance(sel, slice):
-            if 'datetime64' in arr.dtype.name:
+            if 'datetime64' in coord_data.dtype.name:
+                if not isinstance(sel.start, (str, np.datetime64)):
+                    raise TypeError('Input for datetime selection should be either a datetime string or np.datetime64.')
                 start = np.datetime64(sel.start, 's')
                 end = np.datetime64(sel.stop, 's')
-                bool_index = (start <= arr) & (arr < end)
+                bool_index = (start <= coord_data) & (coord_data < end)
             else:
-                bool_index = (sel.start <= arr) & (arr < sel.stop)
+                bool_index = (sel.start <= coord_data) & (coord_data < sel.stop)
     
         else:
             if isinstance(sel, (int, float)):
@@ -411,70 +485,94 @@ def index_coords_hdf5(file, selection: dict):
                 raise TypeError('selection input could not be coerced to an ndarray.')
     
             if sel1.dtype.name == 'bool':
-                if sel1.shape[0] != arr.shape[0]:
+                if sel1.shape[0] != coord_data.shape[0]:
                     raise ValueError('The boolean array does not have the same length as the coord array.')
                 bool_index = sel1
             else:
-                bool_index = np.in1d(arr, sel1)
-    
-        int_index = np.where(bool_index)[0]
-        slice_index = slice(int_index.min(), int_index.max())
-        len1 = slice_index.stop - slice_index.start
-    
-        index_coords_dict[coord] = {'int_index': int_index, 'slice_index': slice_index, 'slice_len': len1}
+                bool_index = np.in1d(coord_data, sel1)
 
-    return index_coords_dict
+        new_coord_data = coord_data[bool_index]
+
+        coords_dict[coord] = new_coord_data
 
 
-def index_coords_xr(file, selection: dict):
-    """
 
-    """
-    coords_list = list(file.coords)
-    
-    index_coords_dict = {}
-    
-    for coord, sel in selection.items():
-        if coord not in coords_list:
-            raise ValueError(coord + ' is not in the coordinates of the hdf5 file.')
-    
-        attrs = dict(file[coord].attrs)
-        enc = {k: v for k, v in attrs.items() if k in decode_data.__code__.co_varnames}
-    
-        arr = decode_data(file[coord].data, **enc)
-    
-        if isinstance(sel, slice):
-            if 'datetime64' in arr.dtype.name:
-                start = np.datetime64(sel.start, 's')
-                end = np.datetime64(sel.stop, 's')
-                bool_index = (start <= arr) & (arr < end)
-            else:
-                bool_index = (sel.start <= arr) & (arr < sel.stop)
-    
-        else:
-            if isinstance(sel, (int, float)):
-                sel = [sel]
-    
-            try:
-                sel1 = np.array(sel)
-            except:
-                raise TypeError('selection input could not be coerced to an ndarray.')
-    
-            if sel1.dtype.name == 'bool':
-                if sel1.shape[0] != arr.shape[0]:
-                    raise ValueError('The boolean array does not have the same length as the coord array.')
-                bool_index = sel1
-            else:
-                bool_index = np.in1d(arr, sel1)
-    
-        int_index = np.where(bool_index)[0]
-        slice_index = slice(int_index.min(), int_index.max())
-        len1 = slice_index.stop - slice_index.start
-    
-        index_coords_dict[coord] = {'int_index': int_index, 'slice_index': slice_index, 'slice_len': len1}
 
-    return index_coords_dict
 
+
+
+
+# def index_coords(files, coords_dict, vars_dict, encodings, selection):
+#     """
+    
+#     """
+#     sel_dict = {}
+
+#     for i, file in enumerate(files):
+#         index_coords_dict = {}
+
+#         for coord in coords_dict:
+#             if coord in selection:
+#                 sel = selection[coord]
+
+#                 coord_enc = encodings[coord]
+        
+#                 if isinstance(file, xr.Dataset):
+#                     arr = decode_data(file[coord].values, **coord_enc)
+#                 else:
+#                     arr = decode_data(file[coord][:], **coord_enc)
+        
+#                 if isinstance(sel, slice):
+#                     if 'datetime64' in arr.dtype.name:
+#                         if not isinstance(sel.start, (str, np.datetime64)):
+#                             raise TypeError('Input for datetime selection should be either a datetime string or np.datetime64.')
+#                         start = np.datetime64(sel.start, 's')
+#                         end = np.datetime64(sel.stop, 's')
+#                         bool_index = (start <= arr) & (arr < end)
+#                     else:
+#                         bool_index = (sel.start <= arr) & (arr < sel.stop)
+            
+#                 else:
+#                     if isinstance(sel, (int, float)):
+#                         sel = [sel]
+            
+#                     try:
+#                         sel1 = np.array(sel)
+#                     except:
+#                         raise TypeError('selection input could not be coerced to an ndarray.')
+            
+#                     if sel1.dtype.name == 'bool':
+#                         if sel1.shape[0] != arr.shape[0]:
+#                             raise ValueError('The boolean array does not have the same length as the coord array.')
+#                         bool_index = sel1
+#                     else:
+#                         bool_index = np.in1d(arr, sel1)
+            
+#                 arr_index = np.where(bool_index)[0]
+
+#                 if len(arr_index) > 0:
+#                     if is_regular_index(arr_index):
+#                         slice_index = slice(arr_index.min(), arr_index.max() + 1)
+#                     else:
+#                         slice_index = arr_index
+#                 else:
+#                     slice_index = None
+
+#             else:
+#                 slice_index = slice(None, None)
+
+#             index_coords_dict[coord] = slice_index
+
+#         sel_dict[i] = index_coords_dict
+
+#     sel_dict1 = {}
+#     for k, v in sel_dict.items():
+#         if None in v.values():
+#             sel_dict1[k] = None
+#         else:
+#             sel_dict1[k] = v
+
+#     return sel_dict1
 
 
 def guess_chunk(shape, maxshape, dtype):
@@ -546,42 +644,18 @@ def guess_chunk(shape, maxshape, dtype):
         return None
 
 
-def copy_chunks_simple(shape, chunks, factor=3):
+def index_chunks(shape, chunks, global_index, local_index, dims_order, factor=3):
     """
 
     """
-    n_shapes = []
-
-    copy_shape = tuple([s*factor if s*factor <= shape[i] else shape[i] for i, s in enumerate(chunks)])
-    for i, s in enumerate(copy_shape):
-        shapes = np.arange(0, shape[i], s)
-        n_shapes.append(shapes)
-
-    # cart = np.array(np.meshgrid(n_shapes)).T.reshape(-1, len(shape))
-    cart = cartesian(n_shapes)
-
-    slices = []
-    append = slices.append
-    for arr in cart:
-        slices1 = tuple([slice(s, s + copy_shape[i]) if s + copy_shape[i] <= shape[i] else slice(s, shape[i]) for i, s in enumerate(arr)])
-        append(slices1)
-
-    source_slices = slices
-
-    return slices, source_slices
-
-
-def copy_chunks_complex(shape, chunks, source_slice_index, source_dim_index, factor=3):
-    """
-
-    """
-    source_shapes = []
-    new_shapes = []
+    local_shapes = []
+    global_shapes = []
     big_chunks = []
+
     for i, s in enumerate(chunks):
         s1 = s*factor
 
-        ssi = source_slice_index[i]
+        ssi = global_index[i]
         if isinstance(ssi, slice):
             len1 = ssi.stop - ssi.start
         else:
@@ -593,8 +667,8 @@ def copy_chunks_complex(shape, chunks, source_slice_index, source_dim_index, fac
             s2 = len1
 
         if isinstance(ssi, slice):
-            shapes = np.arange(source_slice_index[i].start, source_slice_index[i].stop, s2)
-            s_shapes = np.arange(0, source_slice_index[i].stop - source_slice_index[i].start, s2)
+            g_shapes = np.arange(global_index[i].start, global_index[i].stop, s2)
+            l_shapes = np.arange(local_index[i].start, local_index[i].stop, s2)
         else:
             shapes1 = [ssi[i * s2:(i + 1) * s2] for i in range((len(ssi) + s2 - 1) // s2 )]
             a = np.arange(0, len(ssi))
@@ -609,52 +683,53 @@ def copy_chunks_complex(shape, chunks, source_slice_index, source_dim_index, fac
                 shapes = shapes1
                 s_shapes = shapes2
 
-        source_shapes.append(s_shapes)
-        new_shapes.append(shapes)
+        local_shapes.append(l_shapes)
+        global_shapes.append(g_shapes)
         big_chunks.append(s2)
 
     try:
-        cart = cartesian(new_shapes)
-        source_cart = cartesian(source_shapes)
+        global_cart = cartesian(global_shapes)
+        local_cart = cartesian(local_shapes)
     except:
-        cart = np.array(np.meshgrid(new_shapes)).T.reshape(-1, len(shape))
-        source_cart = np.array(np.meshgrid(source_shapes)).T.reshape(-1, len(shape))
+        global_cart = np.array(np.meshgrid(global_cart)).T.reshape(-1, len(shape))
+        local_cart = np.array(np.meshgrid(local_cart)).T.reshape(-1, len(shape))
 
-    slices = []
-    append = slices.append
-    for arr in cart:
+    global_slices = []
+    append = global_slices.append
+    for arr in global_cart:
         slices1 = []
         for i, val in enumerate(arr):
             if isinstance(val, np.ndarray):
                 slice2 = val
             else:
-                if val + big_chunks[i] <= source_slice_index[i].stop:
+                if val + big_chunks[i] <= global_index[i].stop:
                     slice2 = slice(val, val + big_chunks[i])
                 else:
-                    slice2 = slice(val, source_slice_index[i].stop)
+                    slice2 = slice(val, global_index[i].stop)
 
             slices1.append(slice2)
 
         append(tuple(slices1))
 
-    source_slices = []
-    append = source_slices.append
-    for arr in source_cart:
+    local_slices = []
+    append = local_slices.append
+    for arr in local_cart:
         slices1 = []
         for i, val in enumerate(arr):
             if isinstance(val, np.ndarray):
                 slice2 = val
             else:
-                if val + big_chunks[i] <= source_slice_index[i].stop:
+                if val + big_chunks[i] <= local_index[i].stop:
                     slice2 = slice(val, val + big_chunks[i])
                 else:
-                    slice2 = slice(val, source_slice_index[i].stop)
+                    slice2 = slice(val, local_index[i].stop)
 
             slices1.append(slice2)
 
-        append(tuple(slices1[source_dim_index.index(i)] for i in range(len(source_dim_index))))
+        ## Make sure that the dim orders match the local file
+        append(tuple(slices1[dims_order.index(i)] for i in range(len(dims_order))))
 
-    return slices, source_slices
+    return global_slices, local_slices
 
 
 def cartesian(arrays, out=None):
