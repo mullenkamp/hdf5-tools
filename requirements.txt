@@ -1,3 +1,5 @@
-xarray
-h5py
-hdf5plugin
+xarray >=2022.03.0
+h5py >=3.6.0
+hdf5plugin >=3.3.1
+h5netcdf >=1.0.2
+cftime
