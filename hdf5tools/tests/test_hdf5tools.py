@@ -37,7 +37,7 @@ def test_H5_xr(ds_id):
     new_path = os.path.join(base_path, ds_id + '_test1.h5')
     h1.to_hdf5(new_path)
     x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    print(x1.load())
+    print(x1)
 
     first_times = x1.time.values[0:5]
     x1.close()
@@ -50,7 +50,7 @@ def test_H5_xr(ds_id):
 
     main_vars = [v for v in list(x1.data_vars) if set(x1[v].dims) == set(x1.dims)]
     x1.close()
-    h2 = h1.sel(include=main_vars)
+    h2 = h1.sel(include_data_vars=main_vars)
     print(h2)
     h2.to_hdf5(new_path)
     x1 = xr.open_dataset(new_path, engine='h5netcdf')
@@ -72,7 +72,7 @@ def test_H5_hdf5(ds_id):
     new_path = os.path.join(base_path, ds_id + '_test1.h5')
     h1.to_hdf5(new_path)
     x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    print(x1.load())
+    print(x1)
 
     first_times = x1.time.values[0:5]
     x1.close()
@@ -85,7 +85,7 @@ def test_H5_hdf5(ds_id):
 
     main_vars = [v for v in list(x1.data_vars) if set(x1[v].dims) == set(x1.dims)]
     x1.close()
-    h2 = h1.sel(include=main_vars)
+    h2 = h1.sel(include_data_vars=main_vars)
     print(h2)
     h2.to_hdf5(new_path)
     x1 = xr.open_dataset(new_path, engine='h5netcdf')
@@ -115,7 +115,7 @@ def test_H5_mix(ds_id):
     new_path = os.path.join(base_path, ds_id + '_test1.h5')
     h1.to_hdf5(new_path)
     x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    print(x1.load())
+    print(x1)
 
     first_times = x1.time.values[0:5]
     x1.close()
@@ -128,7 +128,7 @@ def test_H5_mix(ds_id):
 
     main_vars = [v for v in list(x1.data_vars) if set(x1[v].dims) == set(x1.dims)]
     x1.close()
-    h2 = h1.sel(include=main_vars)
+    h2 = h1.sel(include_data_vars=main_vars)
     print(h2)
     h2.to_hdf5(new_path)
     x1 = xr.open_dataset(new_path, engine='h5netcdf')
