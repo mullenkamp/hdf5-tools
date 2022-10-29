@@ -32,7 +32,7 @@ import copy
 
 class H5(object):
     """
-    Class to load combine one more HDF5 data files (or xarray datasets) with optional filters. The class will then export the combined data to an HDF5 file, file object, or xr.Dataset.
+    Class to load and combine one or more HDF5 data files (or xarray datasets) with optional filters. The class will then export the combined data to an HDF5 file, file object, or xr.Dataset.
 
     Parameters
     ----------
