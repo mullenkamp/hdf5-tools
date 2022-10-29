@@ -35,7 +35,7 @@ time_str_conversion = {'days': 'datetime64[D]',
 
 enc_fields = ('units', 'calendar', 'dtype', 'missing_value', '_FillValue', 'add_offset', 'scale_factor')
 
-missing_value_dict = {'int8': -128, 'int16': -32768, 'int32': -2147483648, 'int64': -9223372036854775800}
+missing_value_dict = {'int8': -128, 'int16': -32768, 'int32': -2147483648, 'int64': -9223372036854775808}
 
 #########################################################
 ### Functions
@@ -46,11 +46,11 @@ def encode_datetime(data, units=None, calendar='gregorian'):
 
     """
     if units is None:
-        output = data.astype('datetime64[s]').astype(int)
+        output = data.astype('datetime64[s]').astype('int64')
     else:
         if '1970-01-01' in units:
             time_unit = units.split()[0]
-            output = data.astype(time_str_conversion[time_unit]).astype(int)
+            output = data.astype(time_str_conversion[time_unit]).astype('int64')
         else:
             output = cftime.date2num(data.astype('datetime64[s]').tolist(), units, calendar)
 
@@ -107,7 +107,10 @@ def decode_data(data, dtype_decoded, missing_value=None, add_offset=0, scale_fac
 
         data = (data * scale_factor) + add_offset
 
-    elif (data.dtype != dtype_decoded) or (data.dtype.name == 'object'):
+    elif (data.dtype.name == 'object'):
+        data = data.astype(str).astype(dtype_decoded)
+
+    elif (data.dtype != dtype_decoded):
         data = data.astype(dtype_decoded)
 
     return data
@@ -124,12 +127,10 @@ def get_encoding(data):
 
     if (data.dtype.name == 'object') or ('str' in data.dtype.name):
         encoding['dtype'] = h5py.string_dtype()
-        encoding['dtype_decoded'] = encoding['dtype']
     elif ('datetime64' in data.dtype.name) or ('calendar' in encoding):
         encoding['dtype'] = np.dtype('int64')
         encoding['calendar'] = 'gregorian'
         encoding['units'] = 'seconds since 1970-01-01 00:00:00'
-        encoding['dtype_decoded'] = np.dtype('datetime64[s]')
         encoding['missing_value'] = missing_value_dict['int64']
 
     if 'dtype' not in encoding:
@@ -144,23 +145,37 @@ def get_encoding(data):
         if not np.issubdtype(encoding['dtype'], np.integer):
             raise TypeError('If scale_factor is assigned, then the dtype must be a np.integer.')
 
-        if isinstance(encoding['scale_factor'], (int, np.integer)):
-            encoding['dtype_decoded'] = np.dtype('float32')
-        elif encoding['dtype'].itemsize > 2:
-            encoding['dtype_decoded'] = np.dtype('float64')
-        else:
-            encoding['dtype_decoded'] = np.dtype('float32')
-
         if 'missing_value' not in encoding:
             encoding['missing_value'] = missing_value_dict[encoding['dtype'].name]
-
-    if 'dtype_decoded' not in encoding:
-        encoding['dtype_decoded'] = encoding['dtype']
 
     if 'missing_value' in encoding:
         encoding['_FillValue'] = encoding['missing_value']
     if ('_FillValue' in encoding) and ('missing_value' not in encoding):
         encoding['missing_value'] = encoding['_FillValue']
+
+    return encoding
+
+
+def assign_dtype_decoded(encoding):
+    """
+
+    """
+    if encoding['dtype'] == h5py.string_dtype():
+        encoding['dtype_decoded'] = encoding['dtype']
+    elif ('calendar' in encoding) and ('units' in encoding):
+        encoding['dtype_decoded'] = np.dtype('datetime64[s]')
+
+    if 'scale_factor' in encoding:
+
+        # if isinstance(encoding['scale_factor'], (int, np.integer)):
+        #     encoding['dtype_decoded'] = np.dtype('float32')
+        if encoding['dtype'].itemsize > 2:
+            encoding['dtype_decoded'] = np.dtype('float64')
+        else:
+            encoding['dtype_decoded'] = np.dtype('float32')
+
+    if 'dtype_decoded' not in encoding:
+        encoding['dtype_decoded'] = encoding['dtype']
 
     return encoding
 
@@ -180,12 +195,17 @@ def get_encodings(files):
 
         for name in ds_list:
             enc = get_encoding(file[name])
+            enc = assign_dtype_decoded(enc)
             # file_encs[i].update({name: enc})
 
             if name in encs:
                 encs[name].update(enc)
             else:
                 encs[name] = enc
+
+        for name, enc in encs.items():
+            enc = assign_dtype_decoded(enc)
+            encs[name] = enc
 
     return encs
 
@@ -204,12 +224,12 @@ def get_attrs(files):
         for name in file:
             attr = {f: v for f, v in file[name].attrs.items() if (f not in enc_fields) and (f not in ['DIMENSION_LABELS', 'DIMENSION_LIST', 'CLASS', 'NAME', '_Netcdf4Coordinates', '_Netcdf4Dimid', 'REFERENCE_LIST'])}
             # file_attrs[i].update({name: attr})
-    
+
             if name in attrs:
                 attrs[name].update(attr)
             else:
                 attrs[name] = attr
-    
+
     return attrs, global_attrs
 
 
@@ -271,7 +291,7 @@ def open_files(paths, group=None):
 
 def close_files(files):
     """
-    
+
     """
     for f in files:
         f.close()
@@ -310,7 +330,7 @@ def extend_coords(files, encodings):
 
 def index_variables(files, coords_dict, encodings):
     """
-    
+
     """
     vars_dict = {}
 
@@ -351,7 +371,7 @@ def index_variables(files, coords_dict, encodings):
                         global_index.append(slice1)
                     else:
                         global_index.append(global_arr_index)
-    
+
                     if is_regular_index(local_arr_index):
                         slice1 = slice(local_arr_index.min(), local_arr_index.max() + 1)
                         local_index.append(slice1)
@@ -368,7 +388,7 @@ def index_variables(files, coords_dict, encodings):
 
             else:
                 dict1 = {'dims_order': tuple(i for i in range(len(dims))), 'global_index': global_index, 'local_index': local_index}
-    
+
                 if ds_name in vars_dict:
                     if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
                         raise ValueError('dims are not consistant between the same named dataset: ' + ds_name)
@@ -383,12 +403,12 @@ def index_variables(files, coords_dict, encodings):
                     vars_dict[ds_name]['data'][i] = dict1
                 else:
                     shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
-    
+
                     if ds.dtype.name == 'object':
                         fillvalue = None
                     else:
                         fillvalue = var_enc['missing_value']
-    
+
                     vars_dict[ds_name] = {'data': {i: dict1}, 'dims': tuple(dims), 'shape': shape, 'dtype': var_enc['dtype'], 'fillvalue': fillvalue, 'dtype_decoded': var_enc['dtype_decoded']}
 
     return vars_dict
@@ -405,12 +425,12 @@ def index_variables(files, coords_dict, encodings):
 #             sel = selection[coord]
 
 #             coord_enc = encodings[coord]
-    
+
 #             if isinstance(file, xr.Dataset):
 #                 arr = decode_data(file[coord].values, **coord_enc)
 #             else:
 #                 arr = decode_data(file[coord][:], **coord_enc)
-    
+
 #             if isinstance(sel, slice):
 #                 if 'datetime64' in arr.dtype.name:
 #                     if not isinstance(sel.start, (str, np.datetime64)):
@@ -420,23 +440,23 @@ def index_variables(files, coords_dict, encodings):
 #                     bool_index = (start <= arr) & (arr < end)
 #                 else:
 #                     bool_index = (sel.start <= arr) & (arr < sel.stop)
-        
+
 #             else:
 #                 if isinstance(sel, (int, float)):
 #                     sel = [sel]
-        
+
 #                 try:
 #                     sel1 = np.array(sel)
 #                 except:
 #                     raise TypeError('selection input could not be coerced to an ndarray.')
-        
+
 #                 if sel1.dtype.name == 'bool':
 #                     if sel1.shape[0] != arr.shape[0]:
 #                         raise ValueError('The boolean array does not have the same length as the coord array.')
 #                     bool_index = sel1
 #                 else:
 #                     bool_index = np.in1d(arr, sel1)
-        
+
 #             arr_index = np.where(bool_index)[0]
 
 #             if len(arr_index) > 0:
@@ -474,16 +494,16 @@ def filter_coords(files, coords_dict, selection):
                 bool_index = (start <= coord_data) & (coord_data < end)
             else:
                 bool_index = (sel.start <= coord_data) & (coord_data < sel.stop)
-    
+
         else:
             if isinstance(sel, (int, float)):
                 sel = [sel]
-    
+
             try:
                 sel1 = np.array(sel)
             except:
                 raise TypeError('selection input could not be coerced to an ndarray.')
-    
+
             if sel1.dtype.name == 'bool':
                 if sel1.shape[0] != coord_data.shape[0]:
                     raise ValueError('The boolean array does not have the same length as the coord array.')
@@ -504,7 +524,7 @@ def filter_coords(files, coords_dict, selection):
 
 # def index_coords(files, coords_dict, vars_dict, encodings, selection):
 #     """
-    
+
 #     """
 #     sel_dict = {}
 
@@ -516,12 +536,12 @@ def filter_coords(files, coords_dict, selection):
 #                 sel = selection[coord]
 
 #                 coord_enc = encodings[coord]
-        
+
 #                 if isinstance(file, xr.Dataset):
 #                     arr = decode_data(file[coord].values, **coord_enc)
 #                 else:
 #                     arr = decode_data(file[coord][:], **coord_enc)
-        
+
 #                 if isinstance(sel, slice):
 #                     if 'datetime64' in arr.dtype.name:
 #                         if not isinstance(sel.start, (str, np.datetime64)):
@@ -531,23 +551,23 @@ def filter_coords(files, coords_dict, selection):
 #                         bool_index = (start <= arr) & (arr < end)
 #                     else:
 #                         bool_index = (sel.start <= arr) & (arr < sel.stop)
-            
+
 #                 else:
 #                     if isinstance(sel, (int, float)):
 #                         sel = [sel]
-            
+
 #                     try:
 #                         sel1 = np.array(sel)
 #                     except:
 #                         raise TypeError('selection input could not be coerced to an ndarray.')
-            
+
 #                     if sel1.dtype.name == 'bool':
 #                         if sel1.shape[0] != arr.shape[0]:
 #                             raise ValueError('The boolean array does not have the same length as the coord array.')
 #                         bool_index = sel1
 #                     else:
 #                         bool_index = np.in1d(arr, sel1)
-            
+
 #                 arr_index = np.where(bool_index)[0]
 
 #                 if len(arr_index) > 0:
@@ -595,50 +615,50 @@ def guess_chunk(shape, maxshape, dtype):
                     shape1.append(1024)
             else:
                 shape1.append(x)
-    
+
         shape = tuple(shape1)
-    
+
         ndims = len(shape)
         if ndims == 0:
             raise ValueError("Chunks not allowed for scalar datasets.")
-    
+
         chunks = np.array(shape, dtype='=f8')
         if not np.all(np.isfinite(chunks)):
             raise ValueError("Illegal value in chunk tuple")
-    
+
         # Determine the optimal chunk size in bytes using a PyTables expression.
         # This is kept as a float.
         typesize = dtype.itemsize
         # dset_size = np.product(chunks)*typesize
         # target_size = CHUNK_BASE * (2**np.log10(dset_size/(1024.*1024)))
-    
+
         # if target_size > CHUNK_MAX:
         #     target_size = CHUNK_MAX
         # elif target_size < CHUNK_MIN:
         #     target_size = CHUNK_MIN
-    
+
         target_size = CHUNK_MAX
-    
+
         idx = 0
         while True:
             # Repeatedly loop over the axes, dividing them by 2.  Stop when:
             # 1a. We're smaller than the target chunk size, OR
             # 1b. We're within 50% of the target chunk size, AND
             #  2. The chunk is smaller than the maximum chunk size
-    
+
             chunk_bytes = np.product(chunks)*typesize
-    
+
             if (chunk_bytes < target_size or \
              abs(chunk_bytes-target_size)/target_size < 0.5) and \
              chunk_bytes < CHUNK_MAX:
                 break
-    
+
             if np.product(chunks) == 1:
                 break  # Element size larger than CHUNK_MAX
-    
+
             chunks[idx%ndims] = np.ceil(chunks[idx%ndims] / 2.0)
             idx += 1
-    
+
         return tuple(int(x) for x in chunks)
     else:
         return None
@@ -666,6 +686,8 @@ def index_chunks(shape, chunks, global_index, local_index, dims_order, factor=3)
         else:
             s2 = len1
 
+        big_chunks.append(s2)
+
         if isinstance(ssi, slice):
             g_shapes = np.arange(global_index[i].start, global_index[i].stop, s2)
             l_shapes = np.arange(local_index[i].start, local_index[i].stop, s2)
@@ -675,37 +697,50 @@ def index_chunks(shape, chunks, global_index, local_index, dims_order, factor=3)
             shapes2 = [a[i * s2:(i + 1) * s2] for i in range((len(a) + s2 - 1) // s2 )]
 
             if len(shapes1) == 1:
-                shapes = np.empty(1, dtype='object')
-                shapes[:] = shapes1
-                s_shapes = np.empty(1, dtype='object')
-                s_shapes[:] = shapes2
+                g_shapes = np.empty(1, dtype='object')
+                g_shapes[:] = shapes1
             else:
-                shapes = shapes1
-                s_shapes = shapes2
+                g_shapes = shapes1
+
+        global_shapes.append(g_shapes)
+
+        if isinstance(local_index[i], slice):
+            l_shapes = np.arange(local_index[i].start, local_index[i].stop, s2)
+        else:
+            ssi = local_index[i]
+            shapes2 = [ssi[i * s2:(i + 1) * s2] for i in range((len(ssi) + s2 - 1) // s2 )]
+
+            if len(shapes2) == 1:
+                l_shapes = np.empty(1, dtype='object')
+                l_shapes[:] = shapes2
+            else:
+                l_shapes = shapes2
 
         local_shapes.append(l_shapes)
-        global_shapes.append(g_shapes)
-        big_chunks.append(s2)
 
     try:
         global_cart = cartesian(global_shapes)
         local_cart = cartesian(local_shapes)
     except:
-        global_cart = np.array(np.meshgrid(global_cart)).T.reshape(-1, len(shape))
-        local_cart = np.array(np.meshgrid(local_cart)).T.reshape(-1, len(shape))
+        global_cart = np.array(np.meshgrid(global_shapes)).T.reshape(-1, len(shape))
+        local_cart = np.array(np.meshgrid(local_shapes)).T.reshape(-1, len(shape))
 
     global_slices = []
     append = global_slices.append
     for arr in global_cart:
         slices1 = []
         for i, val in enumerate(arr):
+            if isinstance(global_index[i], slice):
+                max_global_index = global_index[i].stop
+            else:
+                max_global_index = global_index[i].max()
             if isinstance(val, np.ndarray):
                 slice2 = val
             else:
-                if val + big_chunks[i] <= global_index[i].stop:
+                if val + big_chunks[i] <= max_global_index:
                     slice2 = slice(val, val + big_chunks[i])
                 else:
-                    slice2 = slice(val, global_index[i].stop)
+                    slice2 = slice(val, max_global_index)
 
             slices1.append(slice2)
 
@@ -716,13 +751,17 @@ def index_chunks(shape, chunks, global_index, local_index, dims_order, factor=3)
     for arr in local_cart:
         slices1 = []
         for i, val in enumerate(arr):
+            if isinstance(local_index[i], slice):
+                max_local_index = local_index[i].stop
+            else:
+                max_local_index = local_index[i].max()
             if isinstance(val, np.ndarray):
                 slice2 = val
             else:
-                if val + big_chunks[i] <= local_index[i].stop:
+                if val + big_chunks[i] <= max_local_index:
                     slice2 = slice(val, val + big_chunks[i])
                 else:
-                    slice2 = slice(val, local_index[i].stop)
+                    slice2 = slice(val, max_local_index)
 
             slices1.append(slice2)
 

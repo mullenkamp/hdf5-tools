@@ -30,9 +30,10 @@ for ds_id, heights in dataset_ids.items():
     stns1 = t1.get_stations(ds_id)
     station_ids = [s['station_id'] for s in stns1[:2]]
     for stn_id in station_ids:
-        file_name = '{ds_id}_{stn_id}.h5'.format(ds_id=ds_id, stn_id=stn_id)
+        file_name = '{ds_id}_{stn_id}.nc'.format(ds_id=ds_id, stn_id=stn_id)
         file_path = os.path.join(base_path, file_name)
-        results = t1.get_results(ds_id, stn_id, heights=heights, output_path=file_path)
+        results = t1.get_results(ds_id, stn_id, heights=heights)
+        results.to_netcdf(file_path, engine='h5netcdf')
 
 
 

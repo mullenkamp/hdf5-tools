@@ -9,12 +9,9 @@ import os
 import numpy as np
 import xarray as xr
 # from time import time
-# from datetime import datetime
-import cftime
-# import dateutil.parser as dparser
 # import numcodecs
-import utils
-# from hdf5tools import utils
+# import utils
+from hdf5tools import utils
 import hdf5plugin
 from typing import Union, List
 import pathlib
@@ -43,14 +40,14 @@ class H5(object):
         The input data need to either be a path to HDF5 file(s), BytesIO objects, or xr.Datasets (or some combo of those).
     group : str or None
         The group or group path within the hdf5 file(s) to the datasets.
-    
+
     Returns
     -------
     H5 instance
     """
     def __init__(self, data: Union[List[Union[str, pathlib.Path, io.BytesIO, xr.Dataset]], Union[str, pathlib.Path, io.BytesIO, xr.Dataset]], group=None):
         """
-        Class to load combine one more HDF5 data files (or xarray datasets) with optional filters. The class will then export the combined data to an HDF5 file, file object, or xr.Dataset.
+        Class to load and combine one or more HDF5 data files (or xarray datasets) with optional filters. The class will then export the combined data to an HDF5 file, file object, or xr.Dataset.
 
         Parameters
         ----------
@@ -58,7 +55,7 @@ class H5(object):
             The input data need to either be a path to HDF5 file(s), BytesIO objects, or xr.Datasets (or some combo of those).
         group : str or None
             The group or group path within the hdf5 file(s) to the datasets.
-        
+
         Returns
         -------
         H5 instance
@@ -109,11 +106,29 @@ class H5(object):
                     all_data_coords.add(dim)
 
             ## Create empty xr.Dataset
-            xr_ds = xr.Dataset(data_vars={k: (v['dims'], np.empty(v['shape'], dtype=v['dtype_decoded'])) for k, v in self._data_vars_dict.items()}, coords={k: v for k, v in self._coords_dict.items() if k in all_data_coords}, attrs=self._global_attrs)
+            data_vars = {}
+            for k, v in self._data_vars_dict.items():
+                if 'datetime' in v['dtype_decoded'].name:
+                    data_vars[k] = (v['dims'], np.empty(v['shape'], dtype=np.dtype('datetime64[ns]')))
+                else:
+                    data_vars[k] = (v['dims'], np.empty(v['shape'], dtype=v['dtype_decoded']))
+
+            coords = {}
+            for k, v in self._coords_dict.items():
+                if k in all_data_coords:
+                    if 'datetime' in v.dtype.name:
+                        coords[k] = v.astype('datetime64[ns]')
+                    else:
+                        coords[k] = v
+
+            xr_ds = xr.Dataset(data_vars=data_vars, coords=coords, attrs=self._global_attrs)
+
             for ds_name, attr in self._attrs.items():
-                xr_ds[ds_name].attrs = attr
+                if ds_name in xr_ds:
+                    xr_ds[ds_name].attrs = attr
             for ds_name, enc in self._encodings.items():
-                xr_ds[ds_name].encoding = enc
+                if ds_name in xr_ds:
+                    xr_ds[ds_name].encoding = enc
 
         else:
             xr_ds = xr.Dataset()
@@ -142,6 +157,10 @@ class H5(object):
             A list of data variables to include in the output. If both include and exclude parameters are passed, only include will be...included...
         exclude : list
             A list of data variables to exclude from the output.
+
+        Returns
+        -------
+        H5 instance
         """
         c = self.copy()
         if selection is not None:
@@ -158,30 +177,30 @@ class H5(object):
             # for var_name in include:
             #     if var_name not in c._data_vars_dict:
             #         raise ValueError(var_name + ' is not a variable in the data.')
-            c._data_vars_dict = {k: v for k, v in c._data_vars_dict if k in include}
+            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k in include}
 
         elif exclude is not None:
             # for var_name in exclude:
             #     if var_name not in c._data_vars_dict:
             #         raise ValueError(var_name + ' is not a variable in the data.')
-            c._data_vars_dict = {k: v for k, v in c._data_vars_dict if k not in exclude}
+            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k not in exclude}
 
         return c
 
 
     def copy(self):
         """
-
+        Deep copy an H5 instance.
         """
         c = copy.deepcopy(self)
 
         return c
 
 
-    def to_hdf5(self, output: Union[str, pathlib.Path, io.BytesIO] = None, group=None, chunks=None, unlimited_dims=None, compression='zstd'):
+    def to_hdf5(self, output: Union[str, pathlib.Path, io.BytesIO], group=None, chunks=None, unlimited_dims=None, compression='zstd'):
         """
         Method to output the filtered data to an HDF5 file or file object.
-    
+
         Parameters
         ----------
         output : str, pathlib.Path, or io.BytesIO
@@ -191,10 +210,10 @@ class H5(object):
         chunks : dict of tuples
             The chunks per dataset. Must be a dictionary of dataset names with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
         unlimited_dims : str, list of str, or None
-            The dimensions/coordinates that should be assigned as "unlimited".
+            The dimensions/coordinates that should be assigned as "unlimited" in the hdf5 file.
         compression : str
-            The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None.
-    
+            The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd requires the hdf5plugin python package, but is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
+
         Returns
         -------
         None
@@ -203,7 +222,7 @@ class H5(object):
             unlimited_dims = [unlimited_dims]
         else:
             unlimited_dims = []
-    
+
         compressor = utils.get_compressor(compression)
 
         files = utils.open_files(self._files, self._group)
@@ -267,12 +286,12 @@ class H5(object):
                 # Load the data by file
                 for i in vars_dict[var_name]['data']:
                     file = files[i]
-        
+
                     ds_old = file[var_name]
 
                     if ds.chunks is None:
-                        if isinstance(ds_old, xr.Dataset):
-                            ds[()] = ds_old.values
+                        if isinstance(ds_old, xr.DataArray):
+                            ds[()] = utils.encode_data(ds_old.values, **self._encodings[var_name])
                         else:
                             ds[()] = ds_old[()]
                     else:
@@ -280,17 +299,17 @@ class H5(object):
                         local_index = vars_dict[var_name]['data'][i]['local_index']
                         dims_order = vars_dict[var_name]['data'][i]['dims_order']
                         local_dims = tuple(dims[dims_order.index(i)] for i in range(len(dims_order)))
-        
+
                         global_chunks, local_chunks = utils.index_chunks(shape, chunks1, global_index, local_index, dims_order)
 
-                        if isinstance(ds_old, xr.Dataset):
+                        if isinstance(ds_old, xr.DataArray):
                             for global_chunk, local_chunk in zip(global_chunks, local_chunks):
                                 data = ds_old[local_chunk].copy().load()
 
                                 if dims == local_dims:
-                                    ds[global_chunk] = data.values
+                                    ds[global_chunk] = utils.encode_data(data.values, **self._encodings[var_name])
                                 else:
-                                    ds[global_chunk] = data.values.transpose(dims_order)
+                                    ds[global_chunk] = utils.encode_data(data.values.transpose(dims_order), **self._encodings[var_name])
                                 data.close()
                                 del data
                         else:
@@ -302,13 +321,15 @@ class H5(object):
 
             ## Assign attrs
             for ds_name, attr in self._attrs.items():
-                nf1[ds_name].attrs.update(attr)
+                if ds_name in nf1:
+                    nf1[ds_name].attrs.update(attr)
 
             for ds_name, encs in self._encodings.items():
-                for f, enc in encs.items():
-                    if 'dtype' in f:
-                        enc = enc.name
-                    nf1[ds_name].attrs.update({f: enc})
+                if ds_name in nf1:
+                    for f, enc in encs.items():
+                        if 'dtype' in f:
+                            enc = enc.name
+                        nf1[ds_name].attrs.update({f: enc})
 
             nf1.attrs.update(self._global_attrs)
 
