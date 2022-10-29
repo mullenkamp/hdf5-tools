@@ -9,14 +9,13 @@ import os
 import numpy as np
 import xarray as xr
 # from time import time
-# from datetime import datetime
-import cftime
-# import dateutil.parser as dparser
 # import numcodecs
 # import utils
 from hdf5tools import utils
 import hdf5plugin
-
+from typing import Union, List
+import pathlib
+import copy
 
 ##############################################
 ### Parameters
@@ -27,321 +26,334 @@ import hdf5plugin
 ### Functions
 
 
-def create_nc_dataset(hdf, xr_dataset, var_name, chunks, compressor, unlimited_dims):
+###################################################
+### Class
+
+
+class H5(object):
     """
-
-    """
-    shape = xr_dataset[var_name].shape
-    dims = xr_dataset[var_name].dims
-    maxshape = tuple([s if dims[i] not in unlimited_dims else None for i, s in enumerate(shape)])
-
-    encoding = xr_dataset[var_name].encoding.copy()
-
-    if (xr_dataset[var_name].dtype.name == 'object') or ('str' in xr_dataset[var_name].dtype.name):
-        xr_dataset[var_name] = xr_dataset[var_name].astype(h5py.string_dtype())
-        encoding['dtype'] = h5py.string_dtype()
-    elif 'datetime64' in xr_dataset[var_name].dtype.name:
-        encoding['dtype'] = np.dtype('int64')
-        encoding['calendar'] = 'gregorian'
-
-    if 'dtype' not in encoding:
-        encoding['dtype'] = xr_dataset[var_name].dtype
-    elif isinstance(encoding['dtype'], str):
-        encoding['dtype'] = np.dtype(encoding['dtype'])
-
-    attrs = xr_dataset[var_name].attrs.copy()
-
-    enc = {k: v for k, v in encoding.items() if k in utils.encode_data.__code__.co_varnames}
-
-    if 'calendar' in enc:
-        enc['units'] = 'seconds since 1970-01-01 00:00:00'
-
-    if 'missing_value' in enc:
-        enc['_FillValue'] = enc['missing_value']
-        fillvalue = enc['missing_value']
-    else:
-        fillvalue = None
-
-    chunks1 = utils.guess_chunk(shape, maxshape, encoding['dtype'])
-
-    if isinstance(chunks, dict):
-        if var_name in chunks:
-            chunks1 = chunks[var_name]
-
-    if len(shape) == 0:
-        chunks1 = None
-        compressor1 = {}
-        fillvalue = None
-        maxshape = None
-    else:
-        compressor1 = compressor
-
-    ds = hdf.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=encoding['dtype'], fillvalue=fillvalue, **compressor1)
-
-    if ds.chunks is None:
-        ds[()] = xr_dataset[var_name].copy().load().values
-
-    elif ('scale_factor' in enc) or ('add_offset' in enc) or ('calendar' in enc):
-        if ds.chunks == shape:
-            ds[:] = utils.encode_data(xr_dataset[var_name].copy().load().values, **enc)
-        else:
-            new_slices, source_slices = utils.copy_chunks_simple(shape, chunks1)
-
-            for new_slice, source_slice in zip(new_slices, source_slices):
-                # print(new_slice, source_slice)
-                ds[new_slice] = utils.encode_data(xr_dataset[var_name][source_slice].copy().load().values, **enc)
-
-    else:
-        if ds.chunks == shape:
-            ds[:] = xr_dataset[var_name].copy().load().values
-        else:
-            new_slices, source_slices = utils.copy_chunks_simple(shape, chunks1)
-
-            for new_slice, source_slice in zip(new_slices, source_slices):
-                # print(new_slice, source_slice)
-                ds[new_slice] = xr_dataset[var_name][source_slice].copy().load().values
-
-    _ = enc.pop('dtype')
-    # print(enc)
-    attrs.update(enc)
-
-    ds.attrs.update(attrs)
-
-    if var_name in xr_dataset.dims:
-        ds.make_scale(var_name)
-
-    ds_dims = ds.dims
-    for i, dim in enumerate(dims):
-        if dim != var_name:
-            ds_dims[i].attach_scale(hdf[dim])
-            ds_dims[i].label = dim
-
-    return ds
-
-
-def xr_to_hdf5(xr_dataset, new_path, group=None, chunks=None, unlimited_dims=None, compression='zstd'):
-    """
+    Class to load and combine one or more HDF5 data files (or xarray datasets) with optional filters. The class will then export the combined data to an HDF5 file, file object, or xr.Dataset.
 
     Parameters
     ----------
-    xr_dataset : xr.Dataset
-        Xarray Dataset.
-    new_path : str or pathlib
-        Output path.
+    data : str, pathlib.Path, io.BytesIO, xr.Dataset, or list of str, pathlib.Path, io.BytesIO, xr.Dataset
+        The input data need to either be a path to HDF5 file(s), BytesIO objects, or xr.Datasets (or some combo of those).
     group : str or None
-        The group or group path within the hdf5 file to the datasets.
-    chunks : dict of tuples
-        The chunks per dataset. Must be a dictionary of dataset name keys with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
-    unlimited_dims : str, list of str, or None
-        The dimensions that should be assigned as "unlimited".
-    compression : str
-        The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None.
-
-    """
-    if isinstance(unlimited_dims, str):
-        unlimited_dims = [unlimited_dims]
-    else:
-        unlimited_dims = []
-
-    compressor = utils.get_compressor(compression)
-
-    xr_dims_list = list(xr_dataset.dims)
-
-    with h5py.File(new_path, 'w', libver='latest', rdcc_nbytes=3*1024*1024) as f:
-
-        if isinstance(group, str):
-            g = f.create_group(group)
-        else:
-            g = f
-
-        ## Create coords
-        for coord in xr_dims_list:
-            _ = create_nc_dataset(g, xr_dataset, coord, chunks, compressor, unlimited_dims)
-
-        ## Create data vars
-        for var in list(xr_dataset.data_vars):
-            _ = create_nc_dataset(g, xr_dataset, var, chunks, compressor, unlimited_dims)
-
-        ## Dataset attrs
-        attrs = {}
-        attrs.update(xr_dataset.attrs)
-        g.attrs.update(attrs)
-
-    if isinstance(new_path, io.BytesIO):
-        new_path.seek(0)
-
-
-def combine_hdf5(paths, new_path, group=None, chunks=None, unlimited_dims=None, compression='zstd'):
-    """
-    Function to combine hdf5 files with flattened datasets within a single group.
-
-    Parameters
-    ----------
-    paths : list of str
-        The list of input hdf5 paths to combine.
-    new_path : str
-        The output path of the new combined hdf5 fie.
-    group : str or None
-        The group or group path within the hdf5 file to the datasets.
-    chunks : dict of tuples
-        The chunks per dataset. Must be a dictionary of dataset name keys with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
-    unlimited_dims : str, list of str, or None
-        The dimensions that should be assigned as "unlimited".
-    compression : str
-        The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None.
+        The group or group path within the hdf5 file(s) to the datasets.
 
     Returns
     -------
-    None
+    H5 instance
     """
-    if isinstance(unlimited_dims, str):
-        unlimited_dims = [unlimited_dims]
-    else:
-        unlimited_dims = []
+    def __init__(self, data: Union[List[Union[str, pathlib.Path, io.BytesIO, xr.Dataset]], Union[str, pathlib.Path, io.BytesIO, xr.Dataset]], group=None):
+        """
+        Class to load and combine one or more HDF5 data files (or xarray datasets) with optional filters. The class will then export the combined data to an HDF5 file, file object, or xr.Dataset.
 
-    compressor = utils.get_compressor(compression)
+        Parameters
+        ----------
+        data : str, pathlib.Path, io.BytesIO, xr.Dataset, or list of str, pathlib.Path, io.BytesIO, xr.Dataset
+            The input data need to either be a path to HDF5 file(s), BytesIO objects, or xr.Datasets (or some combo of those).
+        group : str or None
+            The group or group path within the hdf5 file(s) to the datasets.
 
-    ## Create new file
-    with h5py.File(new_path, 'w', libver='latest', rdcc_nbytes=3*1024*1024) as nf:
-
-        if isinstance(group, str):
-            nf1 = nf.create_group(group)
+        Returns
+        -------
+        H5 instance
+        """
+        ## Read paths input into the appropriate file objects
+        if isinstance(data, list):
+            data1 = data
         else:
-            nf1 = nf
+            data1 = [data]
+
+        files = utils.open_files(data1, group)
+
+        ## Get encodings
+        encodings = utils.get_encodings(files)
+
+        ## Get attrs
+        attrs, global_attrs = utils.get_attrs(files)
 
         ## Get the extended coords
-        coords_dict = utils.extend_coords(paths, group)
-
-        ## Add the coords as datasets
-        for coord, arr in coords_dict.items():
-            shape = arr.shape
-
-            maxshape = tuple([s if s not in unlimited_dims else None for s in shape])
-
-            chunks1 = utils.guess_chunk(shape, maxshape, arr.dtype)
-
-            if isinstance(chunks, dict):
-                if coord in chunks:
-                    chunks1 = chunks[coord]
-
-            ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=arr.dtype, **compressor)
-
-            ds[:] = arr
-
-            ds.make_scale(coord)
+        coords_dict = utils.extend_coords(files, encodings)
 
         ## Add the variables as datasets
-        vars_dict = utils.extend_variables(paths, coords_dict, group)
+        vars_dict = utils.index_variables(files, coords_dict, encodings)
 
-        for var_name in vars_dict:
-            shape = vars_dict[var_name]['shape']
-            dims = vars_dict[var_name]['dims']
-            maxshape = tuple([s if dims[i] not in unlimited_dims else None for i, s in enumerate(shape)])
+        ## Close files
+        utils.close_files(files)
 
-            chunks1 = utils.guess_chunk(shape, maxshape, vars_dict[var_name]['dtype'])
+        ## Assign attributes
+        self._files = data1
+        self._group = group
+        self._coords_dict = coords_dict
+        self._data_vars_dict = vars_dict
+        self._attrs = attrs
+        self._global_attrs = global_attrs
+        self._encodings = encodings
 
-            if isinstance(chunks, dict):
-                if var_name in chunks:
-                    chunks1 = chunks[var_name]
 
-            if len(shape) == 0:
-                chunks1 = None
-                compressor1 = {}
-                vars_dict[var_name]['fillvalue'] = None
-                maxshape = None
-            else:
-                compressor1 = compressor
+    def _build_empty_ds(self):
+        """
 
-            ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[var_name]['dtype'], fillvalue=vars_dict[var_name]['fillvalue'], **compressor1)
+        """
+        if self._data_vars_dict:
 
-            ds_dims = ds.dims
-            for i, dim in enumerate(dims):
-                ds_dims[i].attach_scale(nf1[dim])
-                ds_dims[i].label = dim
+            ## get all of the coords associated with the existing data vars
+            all_data_coords = set()
+            for ds in self._data_vars_dict:
+                for dim in self._data_vars_dict[ds]['dims']:
+                    all_data_coords.add(dim)
 
-            # Load the data by chunk
-            for path in vars_dict[var_name]['data']:
-                with h5py.File(path, 'r') as f:
+            ## Create empty xr.Dataset
+            data_vars = {}
+            for k, v in self._data_vars_dict.items():
+                if 'datetime' in v['dtype_decoded'].name:
+                    data_vars[k] = (v['dims'], np.empty(v['shape'], dtype=np.dtype('datetime64[ns]')))
+                else:
+                    data_vars[k] = (v['dims'], np.empty(v['shape'], dtype=v['dtype_decoded']))
 
-                    if isinstance(group, str):
-                        f1 = f[group]
+            coords = {}
+            for k, v in self._coords_dict.items():
+                if k in all_data_coords:
+                    if 'datetime' in v.dtype.name:
+                        coords[k] = v.astype('datetime64[ns]')
                     else:
-                        f1 = f
-    
-                    ds_old = f1[var_name]
+                        coords[k] = v
+
+            xr_ds = xr.Dataset(data_vars=data_vars, coords=coords, attrs=self._global_attrs)
+
+            for ds_name, attr in self._attrs.items():
+                if ds_name in xr_ds:
+                    xr_ds[ds_name].attrs = attr
+            for ds_name, enc in self._encodings.items():
+                if ds_name in xr_ds:
+                    xr_ds[ds_name].encoding = enc
+
+        else:
+            xr_ds = xr.Dataset()
+
+        return xr_ds
+
+
+    def __repr__(self):
+        """
+
+        """
+        xr_ds = self._build_empty_ds()
+
+        return xr_ds.__repr__()
+
+
+    def sel(self, selection: dict=None, include: list=None, exclude: list=None):
+        """
+        Filter the data by a selection, include, and exclude. Returns a new H5 instance. The selection parameter is very similar to xarry's .sel method.
+
+        Parameters
+        ----------
+        selection : dict
+            This filter requires a dict of coordinates to three different types of filter values. These include slice instances (the best and preferred option), a list/np.ndarray of coordinate values, or a bool np.ndarray of the coordinate data length.
+        include : list
+            A list of data variables to include in the output. If both include and exclude parameters are passed, only include will be...included...
+        exclude : list
+            A list of data variables to exclude from the output.
+
+        Returns
+        -------
+        H5 instance
+        """
+        c = self.copy()
+        if selection is not None:
+            files = utils.open_files(self._files, self._group)
+            utils.filter_coords(files, c._coords_dict, selection)
+            vars_dict = utils.index_variables(files, c._coords_dict, c._encodings)
+
+            c._data_vars_dict = vars_dict
+
+            ## Close files
+            utils.close_files(files)
+
+        if include is not None:
+            # for var_name in include:
+            #     if var_name not in c._data_vars_dict:
+            #         raise ValueError(var_name + ' is not a variable in the data.')
+            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k in include}
+
+        elif exclude is not None:
+            # for var_name in exclude:
+            #     if var_name not in c._data_vars_dict:
+            #         raise ValueError(var_name + ' is not a variable in the data.')
+            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k not in exclude}
+
+        return c
+
+
+    def copy(self):
+        """
+        Deep copy an H5 instance.
+        """
+        c = copy.deepcopy(self)
+
+        return c
+
+
+    def to_hdf5(self, output: Union[str, pathlib.Path, io.BytesIO], group=None, chunks=None, unlimited_dims=None, compression='zstd'):
+        """
+        Method to output the filtered data to an HDF5 file or file object.
+
+        Parameters
+        ----------
+        output : str, pathlib.Path, or io.BytesIO
+            The output path of the new combined hdf5 file.
+        group : str or None
+            The group or group path within the hdf5 file to save the datasets.
+        chunks : dict of tuples
+            The chunks per dataset. Must be a dictionary of dataset names with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
+        unlimited_dims : str, list of str, or None
+            The dimensions/coordinates that should be assigned as "unlimited" in the hdf5 file.
+        compression : str
+            The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd requires the hdf5plugin python package, but is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
+
+        Returns
+        -------
+        None
+        """
+        if isinstance(unlimited_dims, str):
+            unlimited_dims = [unlimited_dims]
+        else:
+            unlimited_dims = []
+
+        compressor = utils.get_compressor(compression)
+
+        files = utils.open_files(self._files, self._group)
+
+        ## Create new file
+        with h5py.File(output, 'w', libver='latest', rdcc_nbytes=3*1024*1024) as nf:
+
+            if isinstance(group, str):
+                nf1 = nf.create_group(group)
+            else:
+                nf1 = nf
+
+            ## Add the coords as datasets
+            for coord, arr in self._coords_dict.items():
+                enc_arr = utils.encode_data(arr, **self._encodings[coord])
+                shape = enc_arr.shape
+
+                maxshape = tuple([s if s not in unlimited_dims else None for s in shape])
+
+                chunks1 = utils.guess_chunk(shape, maxshape, enc_arr.dtype)
+
+                if isinstance(chunks, dict):
+                    if coord in chunks:
+                        chunks1 = chunks[coord]
+
+                ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=enc_arr.dtype, **compressor)
+
+                ds[:] = enc_arr
+
+                ds.make_scale(coord)
+
+            ## Add the variables as datasets
+            vars_dict = copy.deepcopy(self._data_vars_dict)
+
+            for var_name in vars_dict:
+                shape = vars_dict[var_name]['shape']
+                dims = vars_dict[var_name]['dims']
+                maxshape = tuple([s if dims[i] not in unlimited_dims else None for i, s in enumerate(shape)])
+
+                chunks1 = utils.guess_chunk(shape, maxshape, vars_dict[var_name]['dtype'])
+
+                if isinstance(chunks, dict):
+                    if var_name in chunks:
+                        chunks1 = chunks[var_name]
+
+                if len(shape) == 0:
+                    chunks1 = None
+                    compressor1 = {}
+                    vars_dict[var_name]['fillvalue'] = None
+                    maxshape = None
+                else:
+                    compressor1 = compressor
+
+                ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[var_name]['dtype'], fillvalue=vars_dict[var_name]['fillvalue'], **compressor1)
+
+                ds_dims = ds.dims
+                for i, dim in enumerate(dims):
+                    ds_dims[i].attach_scale(nf1[dim])
+                    ds_dims[i].label = dim
+
+                # Load the data by file
+                for i in vars_dict[var_name]['data']:
+                    file = files[i]
+
+                    ds_old = file[var_name]
 
                     if ds.chunks is None:
-                        ds[()] = ds_old[()]
+                        if isinstance(ds_old, xr.DataArray):
+                            ds[()] = utils.encode_data(ds_old.values, **self._encodings[var_name])
+                        else:
+                            ds[()] = ds_old[()]
                     else:
-                        source_slice_index = vars_dict[var_name]['data'][path]['slice_index']
-                        dims_order = vars_dict[var_name]['data'][path]['dims_order']
-        
-                        source_dim_index = [dims_order.index(dim) for dim in dims]
-                        source_slice_index = tuple(source_slice_index[i] for i in source_dim_index)
-        
-                        new_slices, source_slices = utils.copy_chunks_complex(shape, chunks1, source_slice_index, source_dim_index)
-        
-                        for new_slice, source_slice in zip(new_slices, source_slices):
-                            # print(new_slice, source_slice)
-                            if dims == dims_order:
-                                ds[new_slice] = ds_old[source_slice]
-                            else:
-                                ds[new_slice] = ds_old[source_slice].transpose(source_dim_index)
-    
-                    # for chunk in ds.iter_chunks(slice_index):
-                    #     # print(chunk)
-                    #     source_chunk = tuple([slice(chunk[i].start - slice_index[i].start, chunk[i].stop - slice_index[i].start) for i in dims_index])
-                    #     ds[chunk] = ds_old[source_chunk]
+                        global_index = vars_dict[var_name]['data'][i]['global_index']
+                        local_index = vars_dict[var_name]['data'][i]['local_index']
+                        dims_order = vars_dict[var_name]['data'][i]['dims_order']
+                        local_dims = tuple(dims[dims_order.index(i)] for i in range(len(dims_order)))
 
-        ## Assign attrs
-        global_attrs = {}
-        for path in paths:
-            with h5py.File(path, 'r') as f:
+                        global_chunks, local_chunks = utils.index_chunks(shape, chunks1, global_index, local_index, dims_order)
 
-                if isinstance(group, str):
-                    f1 = f[group]
-                else:
-                    f1 = f
-    
-                ds_list = list(f1.keys())
-    
-                for ds_name in ds_list:
-                    attrs = {k: v for k, v in f1[ds_name].attrs.items() if k not in ['DIMENSION_LABELS', 'DIMENSION_LIST', 'CLASS', 'NAME', '_Netcdf4Coordinates', '_Netcdf4Dimid', 'REFERENCE_LIST']}
-                    # print(attrs)
-                    nf1[ds_name].attrs.update(attrs)
-    
-                global_attrs.update(dict(f1.attrs))
+                        if isinstance(ds_old, xr.DataArray):
+                            for global_chunk, local_chunk in zip(global_chunks, local_chunks):
+                                data = ds_old[local_chunk].copy().load()
 
-        nf1.attrs.update(global_attrs)
+                                if dims == local_dims:
+                                    ds[global_chunk] = utils.encode_data(data.values, **self._encodings[var_name])
+                                else:
+                                    ds[global_chunk] = utils.encode_data(data.values.transpose(dims_order), **self._encodings[var_name])
+                                data.close()
+                                del data
+                        else:
+                            for global_chunk, local_chunk in zip(global_chunks, local_chunks):
+                                if dims == local_dims:
+                                    ds[global_chunk] = ds_old[local_chunk]
+                                else:
+                                    ds[global_chunk] = ds_old[local_chunk].transpose(dims_order)
 
-    if isinstance(new_path, io.BytesIO):
-        new_path.seek(0)
+            ## Assign attrs
+            for ds_name, attr in self._attrs.items():
+                if ds_name in nf1:
+                    nf1[ds_name].attrs.update(attr)
 
+            for ds_name, encs in self._encodings.items():
+                if ds_name in nf1:
+                    for f, enc in encs.items():
+                        if 'dtype' in f:
+                            enc = enc.name
+                        nf1[ds_name].attrs.update({f: enc})
 
-def open_dataset(path, **kwargs):
-    """
-    The Xarray open_dataset function, but specifically with the h5netcdf engine to open hdf5 files.
-    """
-    ds = xr.open_dataset(path, engine='h5netcdf', cache=False, **kwargs)
+            nf1.attrs.update(self._global_attrs)
 
-    return ds
+        if isinstance(output, io.BytesIO):
+            output.seek(0)
+
+        utils.close_files(files)
 
 
-def load_dataset(path, **kwargs):
-    """
-    The Xarray load_dataset function, but specifically with the h5netcdf engine to open hdf5 files.
-    """
-    ds = xr.load_dataset(path, engine='h5netcdf', **kwargs)
+    def to_xarray(self):
+        """
+        Save an HDF5 file to an io.BytesIO object which is then opened by xr.open_dataset using the h5netcf engine.
 
-    return ds
+        Returns
+        -------
+        xr.Dataset
+        """
+        b1 = io.BytesIO()
 
+        self.to_hdf5(b1)
 
+        xr_ds = xr.open_dataset(b1, engine='h5netcdf')
 
-
-
-
-
-
+        return xr_ds
 
 
 
