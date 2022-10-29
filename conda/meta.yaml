@@ -32,10 +32,10 @@ build:
 
 requirements:
   build:
-    - python
+    - python >=3.8
     - setuptools
   run:
-    - python
+    - python >=3.8
     - xarray >=2022.03.0
     - h5py >=3.6.0
     - hdf5plugin >=3.3.1
