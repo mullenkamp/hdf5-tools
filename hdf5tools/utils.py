@@ -132,6 +132,7 @@ def get_encoding(data):
         encoding['calendar'] = 'gregorian'
         encoding['units'] = 'seconds since 1970-01-01 00:00:00'
         encoding['missing_value'] = missing_value_dict['int64']
+        encoding['_FillValue'] = encoding['missing_value']
 
     if 'dtype' not in encoding:
         encoding['dtype'] = data.dtype
@@ -145,13 +146,13 @@ def get_encoding(data):
         if not np.issubdtype(encoding['dtype'], np.integer):
             raise TypeError('If scale_factor is assigned, then the dtype must be a np.integer.')
 
+    if encoding['dtype'] != h5py.string_dtype():
+        if ('_FillValue' in encoding) and ('missing_value' not in encoding):
+            encoding['missing_value'] = encoding['_FillValue']
+
         if 'missing_value' not in encoding:
             encoding['missing_value'] = missing_value_dict[encoding['dtype'].name]
-
-    if 'missing_value' in encoding:
-        encoding['_FillValue'] = encoding['missing_value']
-    if ('_FillValue' in encoding) and ('missing_value' not in encoding):
-        encoding['missing_value'] = encoding['_FillValue']
+            encoding['_FillValue'] = encoding['missing_value']
 
     return encoding
 
@@ -670,53 +671,14 @@ def index_chunks(shape, chunks, global_index, local_index, dims_order, factor=3)
     """
     local_shapes = []
     global_shapes = []
-    big_chunks = []
 
     for i, s in enumerate(chunks):
-        s1 = s*factor
+        chunk_size = s*factor
 
-        ssi = global_index[i]
-        if isinstance(ssi, slice):
-            len1 = ssi.stop - ssi.start
-        else:
-            len1 = len(ssi)
+        g_slices, l_slices = array_index_to_slices(global_index[i], local_index[i], chunk_size)
 
-        if s1 <= len1:
-            s2 = s1
-        else:
-            s2 = len1
-
-        big_chunks.append(s2)
-
-        if isinstance(ssi, slice):
-            g_shapes = np.arange(global_index[i].start, global_index[i].stop, s2)
-            l_shapes = np.arange(local_index[i].start, local_index[i].stop, s2)
-        else:
-            shapes1 = [ssi[i * s2:(i + 1) * s2] for i in range((len(ssi) + s2 - 1) // s2 )]
-            a = np.arange(0, len(ssi))
-            shapes2 = [a[i * s2:(i + 1) * s2] for i in range((len(a) + s2 - 1) // s2 )]
-
-            if len(shapes1) == 1:
-                g_shapes = np.empty(1, dtype='object')
-                g_shapes[:] = shapes1
-            else:
-                g_shapes = shapes1
-
-        global_shapes.append(g_shapes)
-
-        if isinstance(local_index[i], slice):
-            l_shapes = np.arange(local_index[i].start, local_index[i].stop, s2)
-        else:
-            ssi = local_index[i]
-            shapes2 = [ssi[i * s2:(i + 1) * s2] for i in range((len(ssi) + s2 - 1) // s2 )]
-
-            if len(shapes2) == 1:
-                l_shapes = np.empty(1, dtype='object')
-                l_shapes[:] = shapes2
-            else:
-                l_shapes = shapes2
-
-        local_shapes.append(l_shapes)
+        global_shapes.append(g_slices)
+        local_shapes.append(l_slices)
 
     try:
         global_cart = cartesian(global_shapes)
@@ -725,48 +687,13 @@ def index_chunks(shape, chunks, global_index, local_index, dims_order, factor=3)
         global_cart = np.array(np.meshgrid(global_shapes)).T.reshape(-1, len(shape))
         local_cart = np.array(np.meshgrid(local_shapes)).T.reshape(-1, len(shape))
 
-    global_slices = []
-    append = global_slices.append
-    for arr in global_cart:
-        slices1 = []
-        for i, val in enumerate(arr):
-            if isinstance(global_index[i], slice):
-                max_global_index = global_index[i].stop
-            else:
-                max_global_index = global_index[i].max()
-            if isinstance(val, np.ndarray):
-                slice2 = val
-            else:
-                if val + big_chunks[i] <= max_global_index:
-                    slice2 = slice(val, val + big_chunks[i])
-                else:
-                    slice2 = slice(val, max_global_index)
+    global_slices = [tuple(g) for g in global_cart]
 
-            slices1.append(slice2)
-
-        append(tuple(slices1))
-
+    # local_order = tuple(dims_order.index(i) for i in range(len(dims_order)))
     local_slices = []
     append = local_slices.append
-    for arr in local_cart:
-        slices1 = []
-        for i, val in enumerate(arr):
-            if isinstance(local_index[i], slice):
-                max_local_index = local_index[i].stop
-            else:
-                max_local_index = local_index[i].max()
-            if isinstance(val, np.ndarray):
-                slice2 = val
-            else:
-                if val + big_chunks[i] <= max_local_index:
-                    slice2 = slice(val, val + big_chunks[i])
-                else:
-                    slice2 = slice(val, max_local_index)
-
-            slices1.append(slice2)
-
-        ## Make sure that the dim orders match the local file
-        append(tuple(slices1[dims_order.index(i)] for i in range(len(dims_order))))
+    for l in local_cart:
+        append(tuple(l[i] for i in dims_order))
 
     return global_slices, local_slices
 
@@ -839,6 +766,60 @@ def get_compressor(name: str = None):
         raise ValueError('name must be one of gzip, lzf, zstd, or None.')
 
     return compressor
+
+
+def array_index_to_slices(g_arr, l_arr, chunk_size):
+    """
+
+    """
+    # if isinstance(g_arr, slice) and isinstance(l_arr, slice):
+    #     return [g_arr], [l_arr]
+
+    if isinstance(l_arr, slice):
+        l_start = l_arr.start
+        l_stop = l_arr.stop
+        l_arr = np.arange(l_start, l_stop)
+    # else:
+    #     l_start = l_arr.min()
+    #     l_stop = l_arr.max()
+        # reg1 = np.append(np.diff(l_arr) != 1, True)
+
+    if isinstance(g_arr, slice):
+        g_start = g_arr.start
+        g_stop = g_arr.stop
+        g_arr = np.arange(g_start, g_stop)
+    else:
+        g_start = g_arr.min()
+        g_stop = g_arr.max()
+
+    reg1 = np.append(np.diff(g_arr) != 1, True)
+
+    chunk_start = (g_start//chunk_size) * chunk_size
+    chunk_stop = ((g_stop // chunk_size) + 1) * chunk_size
+
+    chunk_stops = np.arange(chunk_start, chunk_stop, chunk_size) - 1
+    chunk_stop_pos = np.in1d(g_arr, chunk_stops)
+
+    reg2 = reg1 + chunk_stop_pos
+
+    stop_pos = np.where(reg2)[0]
+
+    g_reg_list = []
+    l_reg_list = []
+    for i, pos in enumerate(stop_pos):
+        if i == 0:
+            g_start = g_arr[0]
+            l_start = l_arr[0]
+        else:
+            g_start = g_arr[stop_pos[i-1]+1]
+            l_start = l_arr[stop_pos[i-1]+1]
+        g_stop = g_arr[pos]+1
+        l_stop = l_arr[pos]+1
+        g_reg_list.append(slice(g_start, g_stop))
+        l_reg_list.append(slice(l_start, l_stop))
+
+    return g_reg_list, l_reg_list
+
 
 
 
