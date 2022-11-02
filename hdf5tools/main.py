@@ -382,7 +382,8 @@ class H5(object):
                             global_index = vars_dict[var_name]['data'][i]['global_index']
                             local_index = vars_dict[var_name]['data'][i]['local_index']
                             dims_order = vars_dict[var_name]['data'][i]['dims_order']
-                            local_dims = tuple(dims[dims_order.index(i)] for i in range(len(dims_order)))
+                            local_dims = tuple(dims[i] for i in dims_order)
+                            transpose_order = tuple(dims_order.index(i) for i in range(len(dims_order)))
 
                             global_chunks, local_chunks = utils.index_chunks(shape, chunks1, global_index, local_index, dims_order)
 
@@ -401,7 +402,7 @@ class H5(object):
                                     if dims == local_dims:
                                         ds[global_chunk] = ds_old[local_chunk]
                                     else:
-                                        ds[global_chunk] = ds_old[local_chunk].transpose(dims_order)
+                                        ds[global_chunk] = ds_old[local_chunk].transpose(transpose_order)
 
                 ## Assign attrs
                 for ds_name, attr in self._attrs.items():
