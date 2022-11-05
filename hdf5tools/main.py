@@ -321,6 +321,7 @@ class H5(object):
 
                 ## Add the coords as datasets
                 for coord, arr in self._coords_dict.items():
+                    # if coord == 'lat':
                     enc_arr = utils.encode_data(arr, **self._encodings[coord])
                     shape = enc_arr.shape
 
