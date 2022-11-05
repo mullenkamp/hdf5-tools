@@ -146,7 +146,7 @@ def get_encoding(data):
         if not np.issubdtype(encoding['dtype'], np.integer):
             raise TypeError('If scale_factor is assigned, then the dtype must be a np.integer.')
 
-    if encoding['dtype'] != h5py.string_dtype():
+    if 'int' in encoding['dtype'].name:
         if ('_FillValue' in encoding) and ('missing_value' not in encoding):
             encoding['missing_value'] = encoding['_FillValue']
 
