@@ -271,8 +271,13 @@ def open_file(path, group=None):
             f = path
     elif isinstance(path, xr.Dataset):
         f = path
+    elif isinstance(path, bytes):
+        if isinstance(group, str):
+            f = h5py.File(io.BytesIO(path), 'r')[group]
+        else:
+            f = h5py.File(io.BytesIO(path), 'r')
     else:
-        raise TypeError('path must be a str/pathlib path to an HDF5 file, an h5py.File, or an xarray Dataset.')
+        raise TypeError('path must be a str/pathlib path to an HDF5 file, an h5py.File, a bytes object of an HDF5 file, or an xarray Dataset.')
 
     return f
 
