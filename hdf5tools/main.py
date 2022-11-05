@@ -36,8 +36,8 @@ class H5(object):
 
     Parameters
     ----------
-    data : str, pathlib.Path, io.BytesIO, xr.Dataset, or list of str, pathlib.Path, io.BytesIO, xr.Dataset
-        The input data need to either be a path to HDF5 file(s), BytesIO objects, or xr.Datasets (or some combo of those).
+    data : str, pathlib.Path, io.BytesIO, xr.Dataset, or list of str, pathlib.Path, io.BytesIO, bytes, or xr.Dataset
+        The input data need to be a path to HDF5 file(s), BytesIO objects, bytes objects, or xr.Datasets (or some combo of those).
     group : str or None
         The group or group path within the hdf5 file(s) to the datasets.
 
@@ -51,8 +51,8 @@ class H5(object):
 
         Parameters
         ----------
-        data : str, pathlib.Path, io.BytesIO, xr.Dataset, or list of str, pathlib.Path, io.BytesIO, xr.Dataset
-            The input data need to either be a path to HDF5 file(s), BytesIO objects, or xr.Datasets (or some combo of those).
+        data : str, pathlib.Path, io.BytesIO, xr.Dataset, or list of str, pathlib.Path, io.BytesIO, bytes, or xr.Dataset
+            The input data need to be a path to HDF5 file(s), BytesIO objects, bytes objects, or xr.Datasets (or some combo of those).
         group : str or None
             The group or group path within the hdf5 file(s) to the datasets.
 
@@ -321,6 +321,7 @@ class H5(object):
 
                 ## Add the coords as datasets
                 for coord, arr in self._coords_dict.items():
+                    # if coord == 'lat':
                     enc_arr = utils.encode_data(arr, **self._encodings[coord])
                     shape = enc_arr.shape
 

@@ -271,8 +271,13 @@ def open_file(path, group=None):
             f = path
     elif isinstance(path, xr.Dataset):
         f = path
+    elif isinstance(path, bytes):
+        if isinstance(group, str):
+            f = h5py.File(io.BytesIO(path), 'r')[group]
+        else:
+            f = h5py.File(io.BytesIO(path), 'r')
     else:
-        raise TypeError('path must be a str/pathlib path to an HDF5 file, an h5py.File, or an xarray Dataset.')
+        raise TypeError('path must be a str/pathlib path to an HDF5 file, an h5py.File, a bytes object of an HDF5 file, or an xarray Dataset.')
 
     return f
 
@@ -317,7 +322,8 @@ def extend_coords(files, encodings):
             ds = file[ds_name]
 
             if isinstance(file, xr.Dataset):
-                data = decode_data(ds.values, **encodings[ds_name])
+                # data = decode_data(ds.values, **encodings[ds_name])
+                data = ds.values
             else:
                 data = decode_data(ds[:], **encodings[ds_name])
 
@@ -355,7 +361,8 @@ def index_variables(files, coords_dict, encodings):
             for dim in ds.dims:
                 if isinstance(file, xr.Dataset):
                     dim_name = dim
-                    dim_data = decode_data(ds[dim_name].values, **encodings[dim_name])
+                    # dim_data = decode_data(ds[dim_name].values, **encodings[dim_name])
+                    dim_data = ds[dim_name].values
                 else:
                     dim_name = dim[0].name.split('/')[-1]
                     dim_data = decode_data(dim[0][:], **encodings[dim_name])
