@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://pypi.io/packages/source/{{ name[0] }}/{{ name }}/hdf5tools-{{ version }}.tar.gz
-  sha256: aa062cd7e635622359cd7b49ed2e0810110074ec89b236899f9e7086f52ee170
+  sha256: 1e68955761d90edfb05fd85ab678f32a82dfc83b4f2f2ca7acb1732c868ce3f6
 
 build:
   noarch: python
