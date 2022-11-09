@@ -321,7 +321,8 @@ class H5(object):
 
                 ## Add the coords as datasets
                 for coord, arr in self._coords_dict.items():
-                    # if coord == 'lat':
+                    # if coord == 'time':
+                    #     break
                     enc_arr = utils.encode_data(arr, **self._encodings[coord])
                     shape = enc_arr.shape
 
@@ -447,7 +448,34 @@ class H5(object):
         return xr_ds
 
 
+################################################
+### Convenience functions
 
+
+def xr_to_hdf5(data: Union[List[xr.Dataset], xr.Dataset], output: Union[str, pathlib.Path, io.BytesIO], group=None, chunks=None, unlimited_dims=None, compression='zstd'):
+    """
+    Convenience function to take one or more xr.Datasets and output the data to an HDF5 file or file object.
+
+    Parameters
+    ----------
+    data : xr.Dataset, or list of xr.Dataset
+        The input data as xr.Datasets.
+    output : str, pathlib.Path, or io.BytesIO
+        The output path of the new combined hdf5 file.
+    group : str or None
+        The group or group path within the hdf5 file to save the datasets.
+    chunks : dict of tuples
+        The chunks per dataset. Must be a dictionary of dataset names with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
+    unlimited_dims : str, list of str, or None
+        The dimensions/coordinates that should be assigned as "unlimited" in the hdf5 file.
+    compression : str
+        The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd requires the hdf5plugin python package, but is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
+
+    Returns
+    -------
+    None
+    """
+    H5(data).to_hdf5(output, group, chunks, unlimited_dims, compression)
 
 
 

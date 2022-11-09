@@ -123,14 +123,27 @@ def get_encoding(data):
     if isinstance(data, xr.DataArray):
         encoding = {f: v for f, v in data.encoding.items() if f in enc_fields}
     else:
-        encoding = {f: v for f, v in data.attrs.items() if f in enc_fields}
+        encoding = {}
+        for f, v in data.attrs.items():
+            if f in enc_fields:
+                if isinstance(v, bytes):
+                    encoding[f] = v.decode()
+                else:
+                    encoding[f] = v
 
     if (data.dtype.name == 'object') or ('str' in data.dtype.name):
         encoding['dtype'] = h5py.string_dtype()
-    elif ('datetime64' in data.dtype.name) or ('calendar' in encoding):
+    elif ('datetime64' in data.dtype.name): # which means it's an xr.DataArray
         encoding['dtype'] = np.dtype('int64')
         encoding['calendar'] = 'gregorian'
         encoding['units'] = 'seconds since 1970-01-01 00:00:00'
+        encoding['missing_value'] = missing_value_dict['int64']
+        encoding['_FillValue'] = encoding['missing_value']
+
+    elif ('calendar' in encoding): # Which means it's not an xr.DataArray
+        encoding['dtype'] = np.dtype('int64')
+        if 'units' not in encoding:
+            encoding['units'] = 'seconds since 1970-01-01 00:00:00'
         encoding['missing_value'] = missing_value_dict['int64']
         encoding['_FillValue'] = encoding['missing_value']
 
@@ -146,7 +159,7 @@ def get_encoding(data):
         if not np.issubdtype(encoding['dtype'], np.integer):
             raise TypeError('If scale_factor is assigned, then the dtype must be a np.integer.')
 
-    if encoding['dtype'] != h5py.string_dtype():
+    if 'int' in encoding['dtype'].name:
         if ('_FillValue' in encoding) and ('missing_value' not in encoding):
             encoding['missing_value'] = encoding['_FillValue']
 
@@ -412,10 +425,10 @@ def index_variables(files, coords_dict, encodings):
                 else:
                     shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
 
-                    if ds.dtype.name == 'object':
-                        fillvalue = None
-                    else:
+                    if 'missing_value' in var_enc:
                         fillvalue = var_enc['missing_value']
+                    else:
+                        fillvalue = None
 
                     vars_dict[ds_name] = {'data': {i: dict1}, 'dims': tuple(dims), 'shape': shape, 'dtype': var_enc['dtype'], 'fillvalue': fillvalue, 'dtype_decoded': var_enc['dtype_decoded']}
 
