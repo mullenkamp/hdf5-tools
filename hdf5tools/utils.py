@@ -133,10 +133,15 @@ def get_encoding(data):
 
     if (data.dtype.name == 'object') or ('str' in data.dtype.name):
         encoding['dtype'] = h5py.string_dtype()
-    elif ('datetime64' in data.dtype.name) or ('calendar' in encoding):
+    elif ('datetime64' in data.dtype.name): # which means it's an xr.DataArray
         encoding['dtype'] = np.dtype('int64')
-        if 'calendar' not in encoding:
-            encoding['calendar'] = 'gregorian'
+        encoding['calendar'] = 'gregorian'
+        encoding['units'] = 'seconds since 1970-01-01 00:00:00'
+        encoding['missing_value'] = missing_value_dict['int64']
+        encoding['_FillValue'] = encoding['missing_value']
+
+    elif ('calendar' in encoding): # Which means it's not an xr.DataArray
+        encoding['dtype'] = np.dtype('int64')
         if 'units' not in encoding:
             encoding['units'] = 'seconds since 1970-01-01 00:00:00'
         encoding['missing_value'] = missing_value_dict['int64']
