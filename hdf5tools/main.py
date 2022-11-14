@@ -116,10 +116,7 @@ class H5(object):
             coords = {}
             for k, v in self._coords_dict.items():
                 if k in all_data_coords:
-                    if 'datetime' in v.dtype.name:
-                        coords[k] = v.astype('datetime64[ns]')
-                    else:
-                        coords[k] = v
+                    coords[k] = utils.decode_data(v, **self._encodings[k])
 
             xr_ds = xr.Dataset(data_vars=data_vars, coords=coords, attrs=self._global_attrs)
 
@@ -169,7 +166,7 @@ class H5(object):
         c = self.copy()
         if selection is not None:
             files = utils.open_files(self._files, self._group)
-            utils.filter_coords(files, c._coords_dict, selection)
+            utils.filter_coords(files, c._coords_dict, selection, self._encodings)
             vars_dict = utils.index_variables(files, c._coords_dict, c._encodings)
 
             c._data_vars_dict = vars_dict
@@ -323,20 +320,20 @@ class H5(object):
                 for coord, arr in self._coords_dict.items():
                     # if coord == 'time':
                     #     break
-                    enc_arr = utils.encode_data(arr, **self._encodings[coord])
-                    shape = enc_arr.shape
+                    shape = arr.shape
+                    dtype = self._encodings[coord]['dtype']
 
                     maxshape = tuple([s if s not in unlimited_dims else None for s in shape])
 
-                    chunks1 = utils.guess_chunk(shape, maxshape, enc_arr.dtype)
+                    chunks1 = utils.guess_chunk(shape, maxshape, dtype)
 
                     if isinstance(chunks, dict):
                         if coord in chunks:
                             chunks1 = chunks[coord]
 
-                    ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=enc_arr.dtype, **compressor)
+                    ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=dtype, **compressor)
 
-                    ds[:] = enc_arr
+                    ds[:] = arr
 
                     ds.make_scale(coord)
 

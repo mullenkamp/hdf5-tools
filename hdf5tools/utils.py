@@ -81,7 +81,8 @@ def encode_data(data, dtype, missing_value=None, add_offset=0, scale_factor=None
         data = encode_datetime(data, units, calendar)
 
     elif isinstance(scale_factor, (int, float, np.number)):
-        data = (data - add_offset)/scale_factor
+        # precision = int(np.abs(np.log10(val['scale_factor'])))
+        data = np.round((data - add_offset)/scale_factor)
 
         if isinstance(missing_value, (int, np.number)):
             data[np.isnan(data)] = missing_value
@@ -107,10 +108,10 @@ def decode_data(data, dtype_decoded, missing_value=None, add_offset=0, scale_fac
 
         data = (data * scale_factor) + add_offset
 
-    elif (data.dtype.name == 'object'):
-        data = data.astype(str).astype(dtype_decoded)
+    # elif (data.dtype.name == 'object'):
+    #     data = data.astype(str).astype(dtype_decoded)
 
-    elif (data.dtype != dtype_decoded):
+    elif (data.dtype != dtype_decoded) or (data.dtype.name == 'object'):
         data = data.astype(dtype_decoded)
 
     return data
@@ -148,6 +149,8 @@ def get_encoding(data):
         encoding['_FillValue'] = encoding['missing_value']
 
     if 'dtype' not in encoding:
+        if np.issubdtype(data.dtype, np.floating):
+            raise ValueError('float dtypes must have encoding data to encode to int.')
         encoding['dtype'] = data.dtype
     elif isinstance(encoding['dtype'], str):
         encoding['dtype'] = np.dtype(encoding['dtype'])
@@ -335,10 +338,12 @@ def extend_coords(files, encodings):
             ds = file[ds_name]
 
             if isinstance(file, xr.Dataset):
-                # data = decode_data(ds.values, **encodings[ds_name])
-                data = ds.values
+                data = encode_data(ds.values, **encodings[ds_name])
             else:
-                data = decode_data(ds[:], **encodings[ds_name])
+                if ds.dtype.name == 'object':
+                    data = ds[:].astype(str).astype(h5py.string_dtype())
+                else:
+                    data = ds[:]
 
             if ds_name in coords_dict:
                 coords_dict[ds_name] = np.union1d(coords_dict[ds_name], data)
@@ -355,6 +360,8 @@ def index_variables(files, coords_dict, encodings):
     vars_dict = {}
 
     for i, file in enumerate(files):
+        # if i == 77:
+        #     break
 
         if isinstance(file, xr.Dataset):
             ds_list = list(file.data_vars)
@@ -374,13 +381,18 @@ def index_variables(files, coords_dict, encodings):
             for dim in ds.dims:
                 if isinstance(file, xr.Dataset):
                     dim_name = dim
-                    # dim_data = decode_data(ds[dim_name].values, **encodings[dim_name])
-                    dim_data = ds[dim_name].values
+                    dim_data = encode_data(ds[dim_name].values, **encodings[dim_name])
                 else:
                     dim_name = dim[0].name.split('/')[-1]
-                    dim_data = decode_data(dim[0][:], **encodings[dim_name])
+                    if dim[0].dtype.name == 'object':
+                        dim_data = dim[0][:].astype(str).astype(h5py.string_dtype())
+                    else:
+                        dim_data = dim[0][:]
 
                 dims.append(dim_name)
+
+                # if dim_name == 'lon':
+                #     break
 
                 global_arr_index = np.where(np.isin(coords_dict[dim_name], dim_data))[0]
                 local_arr_index = np.where(np.isin(dim_data, coords_dict[dim_name]))[0]
@@ -496,7 +508,7 @@ def index_variables(files, coords_dict, encodings):
 #     return index_coords_dict
 
 
-def filter_coords(files, coords_dict, selection):
+def filter_coords(files, coords_dict, selection, encodings):
     """
 
     """
@@ -504,7 +516,7 @@ def filter_coords(files, coords_dict, selection):
         if coord not in coords_dict:
             raise ValueError(coord + ' one of the coordinates.')
 
-        coord_data = coords_dict[coord]
+        coord_data = decode_data(coords_dict[coord], **encodings[coord])
 
         if isinstance(sel, slice):
             if 'datetime64' in coord_data.dtype.name:
@@ -532,7 +544,7 @@ def filter_coords(files, coords_dict, selection):
             else:
                 bool_index = np.in1d(coord_data, sel1)
 
-        new_coord_data = coord_data[bool_index]
+        new_coord_data = encode_data(coord_data[bool_index], **encodings[coord])
 
         coords_dict[coord] = new_coord_data
 
