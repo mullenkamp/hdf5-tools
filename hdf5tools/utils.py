@@ -520,10 +520,19 @@ def filter_coords(files, coords_dict, selection, encodings):
 
         if isinstance(sel, slice):
             if 'datetime64' in coord_data.dtype.name:
-                if not isinstance(sel.start, (str, np.datetime64)):
-                    raise TypeError('Input for datetime selection should be either a datetime string or np.datetime64.')
-                start = np.datetime64(sel.start, 's')
-                end = np.datetime64(sel.stop, 's')
+                # if not isinstance(sel.start, (str, np.datetime64)):
+                #     raise TypeError('Input for datetime selection should be either a datetime string or np.datetime64.')
+
+                if sel.start is not None:
+                    start = np.datetime64(sel.start, 's')
+                else:
+                    start = np.datetime64(coord_data[0] - 1, 's')
+
+                if sel.stop is not None:
+                    end = np.datetime64(sel.stop, 's')
+                else:
+                    end = np.datetime64(coord_data[-1] + 1, 's')
+
                 bool_index = (start <= coord_data) & (coord_data < end)
             else:
                 bool_index = (sel.start <= coord_data) & (coord_data < sel.stop)
