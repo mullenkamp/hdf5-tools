@@ -129,6 +129,11 @@ def get_encoding(data):
             if f in enc_fields:
                 if isinstance(v, bytes):
                     encoding[f] = v.decode()
+                elif isinstance(v, np.ndarray):
+                    if len(v) == 1:
+                        encoding[f] = v[0]
+                    else:
+                        raise ValueError('encoding is an ndarray with len > 1.')
                 else:
                     encoding[f] = v
 
