@@ -309,10 +309,10 @@ class H5(object):
             files = utils.open_files(self._files, self._group)
 
             ## Create new file
-            with h5py.File(output, 'w', libver='latest', rdcc_nbytes=3*1024*1024) as nf:
+            with h5py.File(output, 'w', libver='latest', rdcc_nbytes=3*1024*1024, track_order=True) as nf:
 
                 if isinstance(group, str):
-                    nf1 = nf.create_group(group)
+                    nf1 = nf.create_group(group, track_order=True)
                 else:
                     nf1 = nf
 
@@ -331,11 +331,12 @@ class H5(object):
                         if coord in chunks:
                             chunks1 = chunks[coord]
 
-                    ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=dtype, **compressor)
+                    ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=dtype, track_order=True, **compressor)
 
                     ds[:] = arr
 
                     ds.make_scale(coord)
+                    ds.dims[0].label = coord
 
                 ## Add the variables as datasets
                 vars_dict = copy.deepcopy(self._data_vars_dict)
@@ -359,7 +360,7 @@ class H5(object):
                     else:
                         compressor1 = compressor
 
-                    ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[var_name]['dtype'], fillvalue=vars_dict[var_name]['fillvalue'], **compressor1)
+                    ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[var_name]['dtype'], fillvalue=vars_dict[var_name]['fillvalue'], track_order=True, **compressor1)
 
                     ds_dims = ds.dims
                     for i, dim in enumerate(dims):
