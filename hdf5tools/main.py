@@ -317,6 +317,7 @@ class H5(object):
                     nf1 = nf
 
                 ## Add the coords as datasets
+                # dim_id = 0
                 for coord, arr in self._coords_dict.items():
                     # if coord == 'time':
                     #     break
@@ -338,12 +339,17 @@ class H5(object):
                     ds.make_scale(coord)
                     ds.dims[0].label = coord
 
+                    # ds.attrs['_Netcdf4Dimid'] = dim_id
+                    # dim_id += 1
+                    # ds.attrs['DIMENSION_LABELS'] = coord
+
                 ## Add the variables as datasets
                 vars_dict = copy.deepcopy(self._data_vars_dict)
 
                 for var_name in vars_dict:
                     shape = vars_dict[var_name]['shape']
                     dims = vars_dict[var_name]['dims']
+                    # nc_coords = np.zeros(len(dims), dtype='int32')
                     maxshape = tuple([s if dims[i] not in unlimited_dims else None for i, s in enumerate(shape)])
 
                     chunks1 = utils.guess_chunk(shape, maxshape, vars_dict[var_name]['dtype'])
@@ -366,6 +372,11 @@ class H5(object):
                     for i, dim in enumerate(dims):
                         ds_dims[i].attach_scale(nf1[dim])
                         ds_dims[i].label = dim
+                        # dim_id = nf1[dim].attrs['_Netcdf4Dimid']
+                        # nc_coords[i] = dim_id
+
+                    # ds.attrs['_Netcdf4Coordinates'] = nc_coords
+                    # ds.attrs['_Netcdf4Dimid'] = 3
 
                     # Load the data by file
                     for i in vars_dict[var_name]['data']:
@@ -416,6 +427,7 @@ class H5(object):
                                 enc = enc.name
                             nf1[ds_name].attrs.update({f: enc})
 
+                # nf1.attrs['_NCProperties'] = b'version=2,hdf5=1.12.2,h5py=3.7.0'
                 nf1.attrs.update(self._global_attrs)
 
             if isinstance(output, io.BytesIO):
