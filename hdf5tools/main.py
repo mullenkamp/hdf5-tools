@@ -66,22 +66,22 @@ class H5(object):
         else:
             data1 = [data]
 
-        files = utils.open_files(data1, group)
+        # files = utils.open_files(data1, group)
 
         ## Get encodings
-        encodings = utils.get_encodings(files)
+        encodings = utils.get_encodings(data1, group)
 
         ## Get attrs
-        attrs, global_attrs = utils.get_attrs(files)
+        attrs, global_attrs = utils.get_attrs(data1, group)
 
         ## Get the extended coords
-        coords_dict = utils.extend_coords(files, encodings)
+        coords_dict = utils.extend_coords(data1, encodings, group)
 
         ## Add the variables as datasets
-        vars_dict = utils.index_variables(files, coords_dict, encodings)
+        vars_dict = utils.index_variables(data1, coords_dict, encodings, group)
 
         ## Close files
-        utils.close_files(files)
+        # utils.close_files(files)
 
         ## Assign attributes
         self._files = data1
@@ -165,14 +165,14 @@ class H5(object):
         """
         c = self.copy()
         if selection is not None:
-            files = utils.open_files(self._files, self._group)
-            utils.filter_coords(files, c._coords_dict, selection, self._encodings)
-            vars_dict = utils.index_variables(files, c._coords_dict, c._encodings)
+            # files = utils.open_files(self._files, self._group)
+            utils.filter_coords(c._coords_dict, selection, self._encodings)
+            vars_dict = utils.index_variables(self._files, c._coords_dict, c._encodings, self._group)
 
             c._data_vars_dict = vars_dict
 
             ## Close files
-            utils.close_files(files)
+            # utils.close_files(files)
 
         if include_coords is not None:
             coords_rem_list = []
@@ -306,7 +306,7 @@ class H5(object):
 
             compressor = utils.get_compressor(compression)
 
-            files = utils.open_files(self._files, self._group)
+            # files = utils.open_files(self._files, self._group)
 
             ## Create new file
             with h5py.File(output, 'w', libver='latest', rdcc_nbytes=3*1024*1024, track_order=True) as nf:
@@ -380,7 +380,7 @@ class H5(object):
 
                     # Load the data by file
                     for i in vars_dict[var_name]['data']:
-                        file = files[i]
+                        file = utils.open_file(self._files[i], self._group)
 
                         ds_old = file[var_name]
 
@@ -415,6 +415,9 @@ class H5(object):
                                     else:
                                         ds[global_chunk] = ds_old[local_chunk].transpose(transpose_order)
 
+                        file.close()
+                        # del file
+
                 ## Assign attrs
                 for ds_name, attr in self._attrs.items():
                     if ds_name in nf1:
@@ -433,7 +436,7 @@ class H5(object):
             if isinstance(output, io.BytesIO):
                 output.seek(0)
 
-            utils.close_files(files)
+            # utils.close_files(files)
         else:
             print('No data to save')
 

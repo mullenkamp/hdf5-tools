@@ -202,13 +202,14 @@ def assign_dtype_decoded(encoding):
     return encoding
 
 
-def get_encodings(files):
+def get_encodings(files, group):
     """
     I should add checking across the files for conflicts at some point.
     """
     # file_encs = {}
     encs = {}
-    for i, file in enumerate(files):
+    for i, file1 in enumerate(files):
+        file = open_file(file1, group)
         # file_encs[i] = {}
         if isinstance(file, xr.Dataset):
             ds_list = list(file.variables)
@@ -229,17 +230,20 @@ def get_encodings(files):
             enc = assign_dtype_decoded(enc)
             encs[name] = enc
 
+        file.close()
+
     return encs
 
 
-def get_attrs(files):
+def get_attrs(files, group):
     """
 
     """
     # file_attrs = {}
     global_attrs = {}
     attrs = {}
-    for i, file in enumerate(files):
+    for i, file1 in enumerate(files):
+        file = open_file(file1, group)
         global_attrs.update(dict(file.attrs))
 
         # file_attrs[i] = {}
@@ -251,6 +255,8 @@ def get_attrs(files):
                 attrs[name].update(attr)
             else:
                 attrs[name] = attr
+
+        file.close()
 
     return attrs, global_attrs
 
@@ -323,17 +329,19 @@ def close_files(files):
     for f in files:
         f.close()
         if isinstance(f, xr.Dataset):
-            del f
             xr.backends.file_manager.FILE_CACHE.clear()
 
+        del f
 
-def extend_coords(files, encodings):
+
+def extend_coords(files, encodings, group):
     """
 
     """
     coords_dict = {}
 
-    for file in files:
+    for file1 in files:
+        file = open_file(file1, group)
         if isinstance(file, xr.Dataset):
             ds_list = list(file.coords)
         else:
@@ -355,16 +363,19 @@ def extend_coords(files, encodings):
             else:
                 coords_dict[ds_name] = data
 
+        file.close()
+
     return coords_dict
 
 
-def index_variables(files, coords_dict, encodings):
+def index_variables(files, coords_dict, encodings, group):
     """
 
     """
     vars_dict = {}
 
-    for i, file in enumerate(files):
+    for i, file1 in enumerate(files):
+        file = open_file(file1, group)
         # if i == 77:
         #     break
 
@@ -449,6 +460,8 @@ def index_variables(files, coords_dict, encodings):
 
                     vars_dict[ds_name] = {'data': {i: dict1}, 'dims': tuple(dims), 'shape': shape, 'dtype': var_enc['dtype'], 'fillvalue': fillvalue, 'dtype_decoded': var_enc['dtype_decoded']}
 
+        file.close()
+
     return vars_dict
 
 
@@ -513,7 +526,7 @@ def index_variables(files, coords_dict, encodings):
 #     return index_coords_dict
 
 
-def filter_coords(files, coords_dict, selection, encodings):
+def filter_coords(coords_dict, selection, encodings):
     """
 
     """
