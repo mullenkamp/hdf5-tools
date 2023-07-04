@@ -283,7 +283,7 @@ def open_file(path, group=None):
     """
 
     """
-    if isinstance(path, (str, pathlib.Path, io.BytesIO)):
+    if isinstance(path, (str, pathlib.Path, io.IOBase)):
         if isinstance(group, str):
             f = h5py.File(path, 'r')[group]
         else:
