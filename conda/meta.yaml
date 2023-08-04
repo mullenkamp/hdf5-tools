@@ -46,10 +46,10 @@ test:
     - hdf5tools
 
 about:
-  home: https://github.com/tethys-ts/hdf5-tools
+  home: https://github.com/mullenkamp/hdf5-tools
   license: Apache License 2.0
   license_family: APACHE
   summary: hdf5 tools
   description: python hdf5 tools
-  doc_url: https://github.com/tethys-ts/hdf5-tools
+  doc_url: https://github.com/mullenkamp/hdf5-tools
   dev_url: ''

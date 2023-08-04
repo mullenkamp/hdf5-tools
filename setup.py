@@ -79,7 +79,7 @@ setup(
     #
     # This field corresponds to the "Home-Page" metadata field:
     # https://packaging.python.org/specifications/core-metadata/#home-page-optional
-    url='https://github.com/tethys-ts/hdf5tools',  # Optional
+    url='https://github.com/mullenkamp/hdf5tools',  # Optional
 
     # This should be your name or the name of the organization which owns the
     # project.
