@@ -551,7 +551,7 @@ def guess_chunk(shape, maxshape, dtype):
         # Determine the optimal chunk size in bytes using a PyTables expression.
         # This is kept as a float.
         typesize = dtype.itemsize
-        # dset_size = np.product(chunks)*typesize
+        # dset_size = np.prod(chunks)*typesize
         # target_size = CHUNK_BASE * (2**np.log10(dset_size/(1024.*1024)))
 
         # if target_size > CHUNK_MAX:
@@ -568,14 +568,14 @@ def guess_chunk(shape, maxshape, dtype):
             # 1b. We're within 50% of the target chunk size, AND
             #  2. The chunk is smaller than the maximum chunk size
 
-            chunk_bytes = np.product(chunks)*typesize
+            chunk_bytes = np.prod(chunks)*typesize
 
             if (chunk_bytes < target_size or \
              abs(chunk_bytes-target_size)/target_size < 0.5) and \
              chunk_bytes < CHUNK_MAX:
                 break
 
-            if np.product(chunks) == 1:
+            if np.prod(chunks) == 1:
                 break  # Element size larger than CHUNK_MAX
 
             chunks[idx%ndims] = np.ceil(chunks[idx%ndims] / 2.0)
