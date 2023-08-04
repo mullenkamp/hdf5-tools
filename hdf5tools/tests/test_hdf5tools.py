@@ -97,12 +97,12 @@ def test_H5_xr(ds_id):
     """
 
     """
-    ds_files = [xr.open_dataset(f, engine='netcdf4') for f in files if ds_id in f]
+    ds_files = [xr.open_dataset(f, engine='h5netcdf') for f in files if ds_id in f]
     h1 = H5(ds_files)
     print(h1)
     new_path = os.path.join(base_path, ds_id + '_test1.h5')
     h1.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='netcdf4')
+    x1 = xr.open_dataset(new_path, engine='h5netcdf')
     print(x1)
 
     first_times = x1.time.values[0:5]
@@ -110,7 +110,7 @@ def test_H5_xr(ds_id):
     h2 = h1.sel({'time': slice(first_times[0], first_times[-1])})
     print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='netcdf4')
+    x1 = xr.open_dataset(new_path, engine='h5netcdf')
     print(x1.load())
     assert x1.time.shape[0] == 4
 
@@ -119,7 +119,7 @@ def test_H5_xr(ds_id):
     h2 = h1.sel(include_data_vars=main_vars)
     print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='netcdf4')
+    x1 = xr.open_dataset(new_path, engine='h5netcdf')
     print(x1.load())
     assert set(x1.data_vars) == set(main_vars)
     x1.close()
@@ -137,7 +137,7 @@ def test_H5_hdf5(ds_id):
     print(h1)
     new_path = os.path.join(base_path, ds_id + '_test1.h5')
     h1.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='netcdf4')
+    x1 = xr.open_dataset(new_path, engine='h5netcdf')
     print(x1)
 
     first_times = x1.time.values[0:5]
@@ -145,7 +145,7 @@ def test_H5_hdf5(ds_id):
     h2 = h1.sel({'time': slice(first_times[0], first_times[-1])})
     print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='netcdf4')
+    x1 = xr.open_dataset(new_path, engine='h5netcdf')
     print(x1.load())
     assert x1.time.shape[0] == 4
 
@@ -154,7 +154,7 @@ def test_H5_hdf5(ds_id):
     h2 = h1.sel(include_data_vars=main_vars)
     print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='netcdf4')
+    x1 = xr.open_dataset(new_path, engine='h5netcdf')
     print(x1.load())
     assert set(x1.data_vars) == set(main_vars)
     x1.close()
@@ -174,13 +174,13 @@ def test_H5_mix(ds_id):
             if i == 0:
                 ds_files.append(f)
             else:
-                ds_files.append(xr.open_dataset(f, engine='netcdf4'))
+                ds_files.append(xr.open_dataset(f, engine='h5netcdf'))
 
     h1 = H5(ds_files)
     print(h1)
     new_path = os.path.join(base_path, ds_id + '_test1.h5')
     h1.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='netcdf4')
+    x1 = xr.open_dataset(new_path, engine='h5netcdf')
     print(x1)
 
     first_times = x1.time.values[0:5]
@@ -188,7 +188,7 @@ def test_H5_mix(ds_id):
     h2 = h1.sel({'time': slice(first_times[0], first_times[-1])})
     print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='netcdf4')
+    x1 = xr.open_dataset(new_path, engine='h5netcdf')
     print(x1.load())
     assert x1.time.shape[0] == 4
 
@@ -197,7 +197,7 @@ def test_H5_mix(ds_id):
     h2 = h1.sel(include_data_vars=main_vars)
     print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='netcdf4')
+    x1 = xr.open_dataset(new_path, engine='h5netcdf')
     print(x1.load())
     assert set(x1.data_vars) == set(main_vars)
     x1.close()
@@ -235,7 +235,3 @@ def min_required_for_netcdf4():
         data_ds.dims[0].label = 'conc'
         data_ds.dims[1].attach_scale(nf['n_samples'])
         data_ds.dims[1].label = 'n_samples'
-
-
-
-
