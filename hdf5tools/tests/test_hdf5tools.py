@@ -94,6 +94,12 @@ files.sort()
 
 ds_ids = set([os.path.split(f)[-1].split('_')[0] for f in files])
 
+## Test data
+before_dict = {}
+for ds_id in ds_ids:
+    before = xr_concat([xr.open_dataset(f, engine='h5netcdf') for f in files if ds_id in f])
+    before_dict[ds_id] = before
+
 # for ds_id in ds_ids:
 #     ds_files = [xr.open_dataset(f, engine='h5netcdf') for f in files if ds_id in f]
 #     h1 = H5(ds_files)
@@ -177,7 +183,7 @@ def test_H5_xr(ds_id):
     # print(x1)
 
     ## Compare before and after
-    before = xr_concat(ds_files)
+    before = before_dict[ds_id]
     assert before.equals(x1)
 
     first_times = x1.time.values[0:5]
@@ -219,7 +225,7 @@ def test_H5_hdf5(ds_id):
     # print(x1)
 
     ## Compare before and after
-    before = xr_concat(ds_files)
+    before = before_dict[ds_id]
     assert before.equals(x1)
 
     first_times = x1.time.values[0:5]
@@ -262,30 +268,36 @@ def test_H5_mix(ds_id):
                 ds_files.append(xr.open_dataset(f, engine='h5netcdf'))
 
     h1 = H5(ds_files)
-    print(h1)
+    # print(h1)
     new_path = os.path.join(base_path, ds_id + '_test1.h5')
     h1.to_hdf5(new_path)
     x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    print(x1)
+    # print(x1)
+
+    ## Compare before and after
+    before = before_dict[ds_id]
+    assert before.equals(x1)
 
     first_times = x1.time.values[0:5]
     x1.close()
     h2 = h1.sel({'time': slice(first_times[0], first_times[-1])})
-    print(h2)
+    # print(h2)
     h2.to_hdf5(new_path)
     x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    print(x1.load())
-    assert x1.time.shape[0] == 4
+    x1.load()
+    before2 = before.sel({'time': slice(first_times[0], first_times[-2])})
+    # print(x1)
+    assert before2.equals(x1)
 
     main_vars = [v for v in list(x1.data_vars) if set(x1[v].dims) == set(x1.dims)]
     x1.close()
     h2 = h1.sel(include_data_vars=main_vars)
-    print(h2)
+    # print(h2)
     h2.to_hdf5(new_path)
     x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    print(x1.load())
-    assert set(x1.data_vars) == set(main_vars)
-    x1.close()
+    x1.load()
+    # print(x1)
+    assert before[main_vars].equals(x1)
 
     os.remove(new_path)
 
