@@ -170,10 +170,12 @@ def get_encoding(data):
     if 'int' in encoding['dtype'].name:
         if ('_FillValue' in encoding) and ('missing_value' not in encoding):
             encoding['missing_value'] = encoding['_FillValue']
-
-        if 'missing_value' not in encoding:
-            encoding['missing_value'] = missing_value_dict[encoding['dtype'].name]
+        if ('_FillValue' not in encoding) and ('missing_value' in encoding):
             encoding['_FillValue'] = encoding['missing_value']
+
+        # if 'missing_value' not in encoding:
+        #     encoding['missing_value'] = missing_value_dict[encoding['dtype'].name]
+        #     encoding['_FillValue'] = encoding['missing_value']
 
     return encoding
 
@@ -283,7 +285,7 @@ def open_file(path, group=None):
     """
 
     """
-    if isinstance(path, (str, pathlib.Path, io.BytesIO)):
+    if isinstance(path, (str, pathlib.Path, io.IOBase)):
         if isinstance(group, str):
             f = h5py.File(path, 'r')[group]
         else:
@@ -309,29 +311,29 @@ def open_file(path, group=None):
     return f
 
 
-def open_files(paths, group=None):
-    """
+# def open_files(paths, group=None):
+#     """
 
-    """
-    files = []
-    append = files.append
-    for path in paths:
-        f = open_file(path, group)
-        append(f)
+#     """
+#     files = []
+#     append = files.append
+#     for path in paths:
+#         f = open_file(path, group)
+#         append(f)
 
-    return files
+#     return files
 
 
-def close_files(files):
-    """
+# def close_files(files):
+#     """
 
-    """
-    for f in files:
-        f.close()
-        if isinstance(f, xr.Dataset):
-            xr.backends.file_manager.FILE_CACHE.clear()
+#     """
+#     for f in files:
+#         f.close()
+#         if isinstance(f, xr.Dataset):
+#             xr.backends.file_manager.FILE_CACHE.clear()
 
-        del f
+#         del f
 
 
 def extend_coords(files, encodings, group):
@@ -465,67 +467,6 @@ def index_variables(files, coords_dict, encodings, group):
     return vars_dict
 
 
-# def index_coords_file(file, coords_dict, encodings, selection: dict):
-#     """
-
-#     """
-#     index_coords_dict = {}
-
-#     for coord in coords_dict:
-#         if coord in selection:
-#             sel = selection[coord]
-
-#             coord_enc = encodings[coord]
-
-#             if isinstance(file, xr.Dataset):
-#                 arr = decode_data(file[coord].values, **coord_enc)
-#             else:
-#                 arr = decode_data(file[coord][:], **coord_enc)
-
-#             if isinstance(sel, slice):
-#                 if 'datetime64' in arr.dtype.name:
-#                     if not isinstance(sel.start, (str, np.datetime64)):
-#                         raise TypeError('Input for datetime selection should be either a datetime string or np.datetime64.')
-#                     start = np.datetime64(sel.start, 's')
-#                     end = np.datetime64(sel.stop, 's')
-#                     bool_index = (start <= arr) & (arr < end)
-#                 else:
-#                     bool_index = (sel.start <= arr) & (arr < sel.stop)
-
-#             else:
-#                 if isinstance(sel, (int, float)):
-#                     sel = [sel]
-
-#                 try:
-#                     sel1 = np.array(sel)
-#                 except:
-#                     raise TypeError('selection input could not be coerced to an ndarray.')
-
-#                 if sel1.dtype.name == 'bool':
-#                     if sel1.shape[0] != arr.shape[0]:
-#                         raise ValueError('The boolean array does not have the same length as the coord array.')
-#                     bool_index = sel1
-#                 else:
-#                     bool_index = np.in1d(arr, sel1)
-
-#             arr_index = np.where(bool_index)[0]
-
-#             if len(arr_index) > 0:
-#                 if is_regular_index(arr_index):
-#                     slice_index = slice(arr_index.min(), arr_index.max() + 1)
-#                 else:
-#                     slice_index = arr_index
-#             else:
-#                 return None
-
-#         else:
-#             slice_index = slice(None, None)
-
-#         index_coords_dict[coord] = slice_index
-
-#     return index_coords_dict
-
-
 def filter_coords(coords_dict, selection, encodings):
     """
 
@@ -574,85 +515,6 @@ def filter_coords(coords_dict, selection, encodings):
         new_coord_data = encode_data(coord_data[bool_index], **encodings[coord])
 
         coords_dict[coord] = new_coord_data
-
-
-
-
-
-
-
-
-# def index_coords(files, coords_dict, vars_dict, encodings, selection):
-#     """
-
-#     """
-#     sel_dict = {}
-
-#     for i, file in enumerate(files):
-#         index_coords_dict = {}
-
-#         for coord in coords_dict:
-#             if coord in selection:
-#                 sel = selection[coord]
-
-#                 coord_enc = encodings[coord]
-
-#                 if isinstance(file, xr.Dataset):
-#                     arr = decode_data(file[coord].values, **coord_enc)
-#                 else:
-#                     arr = decode_data(file[coord][:], **coord_enc)
-
-#                 if isinstance(sel, slice):
-#                     if 'datetime64' in arr.dtype.name:
-#                         if not isinstance(sel.start, (str, np.datetime64)):
-#                             raise TypeError('Input for datetime selection should be either a datetime string or np.datetime64.')
-#                         start = np.datetime64(sel.start, 's')
-#                         end = np.datetime64(sel.stop, 's')
-#                         bool_index = (start <= arr) & (arr < end)
-#                     else:
-#                         bool_index = (sel.start <= arr) & (arr < sel.stop)
-
-#                 else:
-#                     if isinstance(sel, (int, float)):
-#                         sel = [sel]
-
-#                     try:
-#                         sel1 = np.array(sel)
-#                     except:
-#                         raise TypeError('selection input could not be coerced to an ndarray.')
-
-#                     if sel1.dtype.name == 'bool':
-#                         if sel1.shape[0] != arr.shape[0]:
-#                             raise ValueError('The boolean array does not have the same length as the coord array.')
-#                         bool_index = sel1
-#                     else:
-#                         bool_index = np.in1d(arr, sel1)
-
-#                 arr_index = np.where(bool_index)[0]
-
-#                 if len(arr_index) > 0:
-#                     if is_regular_index(arr_index):
-#                         slice_index = slice(arr_index.min(), arr_index.max() + 1)
-#                     else:
-#                         slice_index = arr_index
-#                 else:
-#                     slice_index = None
-
-#             else:
-#                 slice_index = slice(None, None)
-
-#             index_coords_dict[coord] = slice_index
-
-#         sel_dict[i] = index_coords_dict
-
-#     sel_dict1 = {}
-#     for k, v in sel_dict.items():
-#         if None in v.values():
-#             sel_dict1[k] = None
-#         else:
-#             sel_dict1[k] = v
-
-#     return sel_dict1
 
 
 def guess_chunk(shape, maxshape, dtype):

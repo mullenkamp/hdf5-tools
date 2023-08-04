@@ -17,6 +17,8 @@ from typing import Union, List
 import pathlib
 import copy
 
+# import utils
+
 ##############################################
 ### Parameters
 
@@ -79,9 +81,6 @@ class H5(object):
 
         ## Add the variables as datasets
         vars_dict = utils.index_variables(data1, coords_dict, encodings, group)
-
-        ## Close files
-        # utils.close_files(files)
 
         ## Assign attributes
         self._files = data1
@@ -288,7 +287,7 @@ class H5(object):
             The chunks per dataset. Must be a dictionary of dataset names with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
         unlimited_dims : str, list of str, or None
             The dimensions/coordinates that should be assigned as "unlimited" in the hdf5 file.
-        compression : str
+        compression : str or None
             The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd requires the hdf5plugin python package, but is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
 
         Returns
@@ -309,7 +308,7 @@ class H5(object):
             # files = utils.open_files(self._files, self._group)
 
             ## Create new file
-            with h5py.File(output, 'w', libver='latest', rdcc_nbytes=3*1024*1024, track_order=True) as nf:
+            with h5py.File(output, 'w', libver='v110', rdcc_nbytes=3*1024*1024, track_order=True) as nf:
 
                 if isinstance(group, str):
                     nf1 = nf.create_group(group, track_order=True)
@@ -350,6 +349,7 @@ class H5(object):
                     shape = vars_dict[var_name]['shape']
                     dims = vars_dict[var_name]['dims']
                     # nc_coords = np.zeros(len(dims), dtype='int32')
+                    # nc_labels = np.zeros(len(dims), dtype='object')
                     maxshape = tuple([s if dims[i] not in unlimited_dims else None for i, s in enumerate(shape)])
 
                     chunks1 = utils.guess_chunk(shape, maxshape, vars_dict[var_name]['dtype'])
@@ -368,15 +368,16 @@ class H5(object):
 
                     ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[var_name]['dtype'], fillvalue=vars_dict[var_name]['fillvalue'], track_order=True, **compressor1)
 
-                    ds_dims = ds.dims
                     for i, dim in enumerate(dims):
-                        ds_dims[i].attach_scale(nf1[dim])
-                        ds_dims[i].label = dim
+                        ds.dims[i].attach_scale(nf1[dim])
+                        ds.dims[i].label = dim
                         # dim_id = nf1[dim].attrs['_Netcdf4Dimid']
                         # nc_coords[i] = dim_id
+                        # nc_labels[i] = dim
 
                     # ds.attrs['_Netcdf4Coordinates'] = nc_coords
-                    # ds.attrs['_Netcdf4Dimid'] = 3
+                    # ds.attrs['_Netcdf4Dimid'] = 4
+                    # ds.attrs['DIMENSION_LABELS'] = nc_labels
 
                     # Load the data by file
                     for i in vars_dict[var_name]['data']:
@@ -418,10 +419,20 @@ class H5(object):
                         file.close()
                         # del file
 
-                ## Assign attrs
+                ## Assign attrs and encodings
                 for ds_name, attr in self._attrs.items():
                     if ds_name in nf1:
                         nf1[ds_name].attrs.update(attr)
+
+                # for ds_name, encs in self._encodings.items():
+                #     if ds_name in nf1:
+                #         if ('int' in encs['dtype_decoded'].name) and (ds_name in self._coords_dict):
+                #             nf1[ds_name].attrs.update({'dtype': encs['dtype'].name})
+                #         else:
+                #             for f, enc in encs.items():
+                #                 if 'dtype' in f:
+                #                     enc = enc.name
+                #                 nf1[ds_name].attrs.update({f: enc})
 
                 for ds_name, encs in self._encodings.items():
                     if ds_name in nf1:
@@ -432,6 +443,7 @@ class H5(object):
 
                 # nf1.attrs['_NCProperties'] = b'version=2,hdf5=1.12.2,h5py=3.7.0'
                 nf1.attrs.update(self._global_attrs)
+                # nf1.attrs.update({'unlimited_dims': ''})
 
             if isinstance(output, io.BytesIO):
                 output.seek(0)
