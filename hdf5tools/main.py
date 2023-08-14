@@ -68,8 +68,6 @@ class H5(object):
         else:
             data1 = [data]
 
-        # files = utils.open_files(data1, group)
-
         ## Get encodings
         encodings = utils.get_encodings(data1, group)
 
@@ -164,14 +162,10 @@ class H5(object):
         """
         c = self.copy()
         if selection is not None:
-            # files = utils.open_files(self._files, self._group)
             utils.filter_coords(c._coords_dict, selection, self._encodings)
             vars_dict = utils.index_variables(self._files, c._coords_dict, c._encodings, self._group)
 
             c._data_vars_dict = vars_dict
-
-            ## Close files
-            # utils.close_files(files)
 
         if include_coords is not None:
             coords_rem_list = []
@@ -305,8 +299,6 @@ class H5(object):
 
             compressor = utils.get_compressor(compression)
 
-            # files = utils.open_files(self._files, self._group)
-
             ## Create new file
             with h5py.File(output, 'w', libver='v110', rdcc_nbytes=3*1024*1024, track_order=True) as nf:
 
@@ -379,60 +371,26 @@ class H5(object):
                     # ds.attrs['_Netcdf4Dimid'] = 4
                     # ds.attrs['DIMENSION_LABELS'] = nc_labels
 
-                    # Load the data by file
-                    for i in vars_dict[var_name]['data']:
-                        file = utils.open_file(self._files[i], self._group)
+                    ds_vars = vars_dict[var_name]
 
-                        ds_old = file[var_name]
+                    # Load data by file if no chunks are assigned
+                    if ds.chunks is None:
+                        for i in ds_vars['data']:
+                            with utils.open_file(self._files[i], self._group) as file:
+                                ds_old = file[var_name]
 
-                        if ds.chunks is None:
-                            if isinstance(ds_old, xr.DataArray):
-                                ds[()] = utils.encode_data(ds_old.values, **self._encodings[var_name])
-                            else:
-                                ds[()] = ds_old[()]
-                        else:
-                            global_index = vars_dict[var_name]['data'][i]['global_index']
-                            local_index = vars_dict[var_name]['data'][i]['local_index']
-                            dims_order = vars_dict[var_name]['data'][i]['dims_order']
-                            local_dims = tuple(dims[i] for i in dims_order)
-                            transpose_order = tuple(dims_order.index(i) for i in range(len(dims_order)))
-
-                            global_chunks, local_chunks = utils.index_chunks(shape, chunks1, global_index, local_index, dims_order)
-
-                            if isinstance(ds_old, xr.DataArray):
-                                for global_chunk, local_chunk in zip(global_chunks, local_chunks):
-                                    data = ds_old[local_chunk].copy().load()
-
-                                    if dims == local_dims:
-                                        ds[global_chunk] = utils.encode_data(data.values, **self._encodings[var_name])
-                                    else:
-                                        ds[global_chunk] = utils.encode_data(data.values.transpose(dims_order), **self._encodings[var_name])
-                                    data.close()
-                                    del data
-                            else:
-                                for global_chunk, local_chunk in zip(global_chunks, local_chunks):
-                                    if dims == local_dims:
-                                        ds[global_chunk] = ds_old[local_chunk]
-                                    else:
-                                        ds[global_chunk] = ds_old[local_chunk].transpose(transpose_order)
-
-                        file.close()
-                        # del file
+                                if isinstance(ds_old, xr.DataArray):
+                                    ds[()] = utils.encode_data(ds_old.values, **self._encodings[var_name])
+                                else:
+                                    ds[()] = ds_old[()]
+                    else:
+                        # Save data by chunk for efficiency
+                        utils.fill_chunks_by_files(ds, self._files, ds_vars, var_name, self._group, self._encodings)
 
                 ## Assign attrs and encodings
                 for ds_name, attr in self._attrs.items():
                     if ds_name in nf1:
                         nf1[ds_name].attrs.update(attr)
-
-                # for ds_name, encs in self._encodings.items():
-                #     if ds_name in nf1:
-                #         if ('int' in encs['dtype_decoded'].name) and (ds_name in self._coords_dict):
-                #             nf1[ds_name].attrs.update({'dtype': encs['dtype'].name})
-                #         else:
-                #             for f, enc in encs.items():
-                #                 if 'dtype' in f:
-                #                     enc = enc.name
-                #                 nf1[ds_name].attrs.update({f: enc})
 
                 for ds_name, encs in self._encodings.items():
                     if ds_name in nf1:
@@ -448,7 +406,6 @@ class H5(object):
             if isinstance(output, io.BytesIO):
                 output.seek(0)
 
-            # utils.close_files(files)
         else:
             print('No data to save')
 
