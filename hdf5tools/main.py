@@ -68,8 +68,6 @@ class H5(object):
         else:
             data1 = [data]
 
-        # files = utils.open_files(data1, group)
-
         ## Get encodings
         encodings = utils.get_encodings(data1, group)
 
@@ -164,14 +162,10 @@ class H5(object):
         """
         c = self.copy()
         if selection is not None:
-            # files = utils.open_files(self._files, self._group)
             utils.filter_coords(c._coords_dict, selection, self._encodings)
             vars_dict = utils.index_variables(self._files, c._coords_dict, c._encodings, self._group)
 
             c._data_vars_dict = vars_dict
-
-            ## Close files
-            # utils.close_files(files)
 
         if include_coords is not None:
             coords_rem_list = []
@@ -391,22 +385,12 @@ class H5(object):
                                     ds[()] = ds_old[()]
                     else:
                         # Save data by chunk for efficiency
-                        utils.fill_chunks_by_files(ds, self._files, ds_vars, var_name, chunks1, self._group, self._encodings)
+                        utils.fill_chunks_by_files(ds, self._files, ds_vars, var_name, self._group, self._encodings)
 
                 ## Assign attrs and encodings
                 for ds_name, attr in self._attrs.items():
                     if ds_name in nf1:
                         nf1[ds_name].attrs.update(attr)
-
-                # for ds_name, encs in self._encodings.items():
-                #     if ds_name in nf1:
-                #         if ('int' in encs['dtype_decoded'].name) and (ds_name in self._coords_dict):
-                #             nf1[ds_name].attrs.update({'dtype': encs['dtype'].name})
-                #         else:
-                #             for f, enc in encs.items():
-                #                 if 'dtype' in f:
-                #                     enc = enc.name
-                #                 nf1[ds_name].attrs.update({f: enc})
 
                 for ds_name, encs in self._encodings.items():
                     if ds_name in nf1:
@@ -422,7 +406,6 @@ class H5(object):
             if isinstance(output, io.BytesIO):
                 output.seek(0)
 
-            # utils.close_files(files)
         else:
             print('No data to save')
 
