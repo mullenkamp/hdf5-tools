@@ -305,8 +305,6 @@ class H5(object):
 
             compressor = utils.get_compressor(compression)
 
-            # files = utils.open_files(self._files, self._group)
-
             ## Create new file
             with h5py.File(output, 'w', libver='v110', rdcc_nbytes=3*1024*1024, track_order=True) as nf:
 
@@ -379,45 +377,21 @@ class H5(object):
                     # ds.attrs['_Netcdf4Dimid'] = 4
                     # ds.attrs['DIMENSION_LABELS'] = nc_labels
 
-                    # Load the data by file
-                    for i in vars_dict[var_name]['data']:
-                        file = utils.open_file(self._files[i], self._group)
+                    ds_vars = vars_dict[var_name]
 
-                        ds_old = file[var_name]
+                    # Load data by file if no chunks are assigned
+                    if ds.chunks is None:
+                        for i in ds_vars['data']:
+                            with utils.open_file(self._files[i], self._group) as file:
+                                ds_old = file[var_name]
 
-                        if ds.chunks is None:
-                            if isinstance(ds_old, xr.DataArray):
-                                ds[()] = utils.encode_data(ds_old.values, **self._encodings[var_name])
-                            else:
-                                ds[()] = ds_old[()]
-                        else:
-                            global_index = vars_dict[var_name]['data'][i]['global_index']
-                            local_index = vars_dict[var_name]['data'][i]['local_index']
-                            dims_order = vars_dict[var_name]['data'][i]['dims_order']
-                            local_dims = tuple(dims[i] for i in dims_order)
-                            transpose_order = tuple(dims_order.index(i) for i in range(len(dims_order)))
-
-                            global_chunks, local_chunks = utils.index_chunks(shape, chunks1, global_index, local_index, dims_order)
-
-                            if isinstance(ds_old, xr.DataArray):
-                                for global_chunk, local_chunk in zip(global_chunks, local_chunks):
-                                    data = ds_old[local_chunk].copy().load()
-
-                                    if dims == local_dims:
-                                        ds[global_chunk] = utils.encode_data(data.values, **self._encodings[var_name])
-                                    else:
-                                        ds[global_chunk] = utils.encode_data(data.values.transpose(dims_order), **self._encodings[var_name])
-                                    data.close()
-                                    del data
-                            else:
-                                for global_chunk, local_chunk in zip(global_chunks, local_chunks):
-                                    if dims == local_dims:
-                                        ds[global_chunk] = ds_old[local_chunk]
-                                    else:
-                                        ds[global_chunk] = ds_old[local_chunk].transpose(transpose_order)
-
-                        file.close()
-                        # del file
+                                if isinstance(ds_old, xr.DataArray):
+                                    ds[()] = utils.encode_data(ds_old.values, **self._encodings[var_name])
+                                else:
+                                    ds[()] = ds_old[()]
+                    else:
+                        # Save data by chunk for efficiency
+                        utils.fill_chunks_by_files(ds, self._files, ds_vars, var_name, chunks1, self._group, self._encodings)
 
                 ## Assign attrs and encodings
                 for ds_name, attr in self._attrs.items():

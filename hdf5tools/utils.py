@@ -392,8 +392,8 @@ def index_variables(files, coords_dict, encodings, group):
             var_enc = encodings[ds_name]
 
             dims = []
-            global_index = []
-            local_index = []
+            global_index = {}
+            local_index = {}
             remove_ds = False
 
             for dim in ds.dims:
@@ -417,17 +417,20 @@ def index_variables(files, coords_dict, encodings, group):
 
                 if len(global_arr_index) > 0:
 
-                    if is_regular_index(global_arr_index):
-                        slice1 = slice(global_arr_index.min(), global_arr_index.max() + 1)
-                        global_index.append(slice1)
-                    else:
-                        global_index.append(global_arr_index)
+                    global_index[dim_name] = global_arr_index
+                    local_index[dim_name] = local_arr_index
 
-                    if is_regular_index(local_arr_index):
-                        slice1 = slice(local_arr_index.min(), local_arr_index.max() + 1)
-                        local_index.append(slice1)
-                    else:
-                        local_index.append(local_arr_index)
+                    # if is_regular_index(global_arr_index):
+                    #     slice1 = slice(global_arr_index.min(), global_arr_index.max() + 1)
+                    #     global_index[dim_name] = slice1
+                    # else:
+                    #     global_index[dim_name] = global_arr_index
+
+                    # if is_regular_index(local_arr_index):
+                    #     slice1 = slice(local_arr_index.min(), local_arr_index.max() + 1)
+                    #     local_index[dim_name] = slice1
+                    # else:
+                    #     local_index[dim_name] = local_arr_index
                 else:
                     remove_ds = True
                     break
@@ -448,8 +451,8 @@ def index_variables(files, coords_dict, encodings, group):
 
                     dims_order = [vars_dict[ds_name]['dims'].index(dim) for dim in dims]
                     dict1['dims_order'] = tuple(dims_order)
-                    dict1['global_index'] = [dict1['global_index'][dims_order.index(i)] for i in range(len(dims_order))]
-                    dict1['local_index'] = [dict1['local_index'][dims_order.index(i)] for i in range(len(dims_order))]
+                    # dict1['global_index'] = [dict1['global_index'][dims_order.index(i)] for i in range(len(dims_order))]
+                    # dict1['local_index'] = [dict1['local_index'][dims_order.index(i)] for i in range(len(dims_order))]
 
                     vars_dict[ds_name]['data'][i] = dict1
                 else:
@@ -742,12 +745,89 @@ def array_index_to_slices(g_arr, l_arr, chunk_size):
     return g_reg_list, l_reg_list
 
 
+def fill_chunks_by_files(ds, files, ds_vars, var_name, chunk_size, group, encodings):
+    """
+
+    """
+    shape = ds_vars['shape']
+    dims = ds_vars['dims']
+
+    chunks = global_chunks(shape, chunk_size)
+
+    for chunk_start in chunks:
+        # Determine the chunk shape
+        chunk_end = []
+        for i in range(len(chunk_start)):
+            chunk_end1 = chunk_start[i] + chunk_size[i]
+            if chunk_end1 > shape[i]:
+                chunk_end.append(shape[i])
+            else:
+                chunk_end.append(chunk_end1)
+
+        chunk_size1 = np.array(chunk_end) - np.array(chunk_start)
+        chunk_arr = np.full(chunk_size1, fill_value=ds_vars['fillvalue'], dtype=ds_vars['dtype'], order='C')
+        # chunk_arr_index = tuple([np.arange(c) for c in chunk_size1])
+        for i_file, data in ds_vars['data'].items():
+            # if i_file == 9:
+            #     break
+            g_index = [(chunk_start[i] <= gi) & (gi < chunk_end[i]) for i, gi in enumerate(data['global_index'].values())]
+            bool1 = all([a.any() for a in g_index])
+            if bool1:
+                l_slices = {}
+                for i, dim in enumerate(dims):
+                    w = np.where(g_index[i])[0]
+                    l_slices[dim] = slice(data['local_index'][dim][min(w)], data['local_index'][dim][max(w)] + 1, None)
+
+                # l_slices1 = tuple([l_slices[i] for i in data['dims_order']])
+                if tuple(range(len(dims))) == data['dims_order']:
+                    transpose_order = None
+                else:
+                    transpose_order = tuple(data['dims_order'].index(i) for i in range(len(data['dims_order'])))
+
+                with open_file(files[i_file], group) as f:
+                    if isinstance(f, xr.Dataset):
+                        l_data = encode_data(f[var_name][tuple(l_slices.values())].values, **encodings[var_name])
+                    else:
+                        l_data = f[var_name][tuple(l_slices.values())]
+
+                    if transpose_order is not None:
+                        l_data = l_data.transpose(transpose_order)
+
+                    g_chunk_index = []
+                    for i, dim in enumerate(dims):
+                        s1 = data['global_index'][dim][g_index[i]] - chunk_start[i]
+                        if (s1[-1] - s1[0] + 1) == len(s1):
+                            s1 = slice(s1[0], s1[-1] + 1, None)
+                        g_chunk_index.append(s1)
+                    # g_chunk_index = tuple(data['global_index'][dim][g_index[i]] - chunk_start[i] for i, dim in enumerate(dims))
+                    # g_chunk_index = tuple(np.in1d(chunk_arr_index[i], (data['global_index'][dim][g_index[i]] - chunk_start[i])) for i, dim in enumerate(dims))
+                    # numpy doesn't like to index the entire array...
+                    # if tuple([a.sum() for a in g_chunk_index]) == chunk_arr.shape:
+                    #     chunk_arr = l_data
+                    # else:
+                    chunk_arr[tuple(g_chunk_index)] = l_data
+
+        ## Save chunk to new dataset
+        slices0 = tuple([slice(cs, chunk_end[i], None) for i, cs in enumerate(chunk_start)])
+        ds[slices0] = chunk_arr
 
 
+def make_array(l):
+    """
+
+    """
+    l1 = [a if isinstance(a, np.ndarray) else np.arange(a.start, a.stop) for a in l]
+    return l1
 
 
+def global_chunks(shape, chunk_size):
+    """
 
+    """
+    n_chunks0 = [np.arange(0, shape[i], chunk_size[i]) for i in np.arange(len(shape))]
+    n_chunks1 = cartesian(n_chunks0)
 
+    return n_chunks1
 
 
 
