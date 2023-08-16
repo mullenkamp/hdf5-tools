@@ -318,29 +318,27 @@ def extend_coords(files, encodings, group):
     coords_dict = {}
 
     for file1 in files:
-        file = open_file(file1, group)
-        if isinstance(file, xr.Dataset):
-            ds_list = list(file.coords)
-        else:
-            ds_list = [ds_name for ds_name in file.keys() if is_scale(file[ds_name])]
-
-        for ds_name in ds_list:
-            ds = file[ds_name]
-
+        with open_file(file1, group) as file:
             if isinstance(file, xr.Dataset):
-                data = encode_data(ds.values, **encodings[ds_name])
+                ds_list = list(file.coords)
             else:
-                if ds.dtype.name == 'object':
-                    data = ds[:].astype(str).astype(h5py.string_dtype())
+                ds_list = [ds_name for ds_name in file.keys() if is_scale(file[ds_name])]
+
+            for ds_name in ds_list:
+                ds = file[ds_name]
+
+                if isinstance(file, xr.Dataset):
+                    data = encode_data(ds.values, **encodings[ds_name])
                 else:
-                    data = ds[:]
+                    if ds.dtype.name == 'object':
+                        data = ds[:].astype(str).astype(h5py.string_dtype())
+                    else:
+                        data = ds[:]
 
-            if ds_name in coords_dict:
-                coords_dict[ds_name] = np.union1d(coords_dict[ds_name], data)
-            else:
-                coords_dict[ds_name] = data
-
-        file.close()
+                if ds_name in coords_dict:
+                    coords_dict[ds_name] = np.union1d(coords_dict[ds_name], data)
+                else:
+                    coords_dict[ds_name] = data
 
     return coords_dict
 
@@ -352,81 +350,80 @@ def index_variables(files, coords_dict, encodings, group):
     vars_dict = {}
 
     for i, file1 in enumerate(files):
-        file = open_file(file1, group)
-        # if i == 77:
-        #     break
+        with open_file(file1, group) as file:
+            # if i == 77:
+            #     break
 
-        if isinstance(file, xr.Dataset):
-            ds_list = list(file.data_vars)
-        else:
-            ds_list = [ds_name for ds_name in file.keys() if not is_scale(file[ds_name])]
-
-        for ds_name in ds_list:
-            ds = file[ds_name]
-
-            var_enc = encodings[ds_name]
-
-            dims = []
-            global_index = {}
-            local_index = {}
-            remove_ds = False
-
-            for dim in ds.dims:
-                if isinstance(file, xr.Dataset):
-                    dim_name = dim
-                    dim_data = encode_data(ds[dim_name].values, **encodings[dim_name])
-                else:
-                    dim_name = dim[0].name.split('/')[-1]
-                    if dim[0].dtype.name == 'object':
-                        dim_data = dim[0][:].astype(str).astype(h5py.string_dtype())
-                    else:
-                        dim_data = dim[0][:]
-
-                dims.append(dim_name)
-
-                # if dim_name == 'lon':
-                #     break
-
-                global_arr_index = np.where(np.isin(coords_dict[dim_name], dim_data))[0]
-                local_arr_index = np.where(np.isin(dim_data, coords_dict[dim_name]))[0]
-
-                if len(global_arr_index) > 0:
-
-                    global_index[dim_name] = global_arr_index
-                    local_index[dim_name] = local_arr_index
-                else:
-                    remove_ds = True
-                    break
-
-            if remove_ds:
-                if ds_name in vars_dict:
-                    if i in vars_dict[ds_name]['data']:
-                        del vars_dict[ds_name]['data'][i]
-
+            if isinstance(file, xr.Dataset):
+                ds_list = list(file.data_vars)
             else:
-                dict1 = {'dims_order': tuple(i for i in range(len(dims))), 'global_index': global_index, 'local_index': local_index}
+                ds_list = [ds_name for ds_name in file.keys() if not is_scale(file[ds_name])]
 
-                if ds_name in vars_dict:
-                    if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
-                        raise ValueError('dims are not consistant between the same named dataset: ' + ds_name)
-                    # if vars_dict[ds_name]['dtype'] != ds.dtype:
-                    #     raise ValueError('dtypes are not consistant between the same named dataset: ' + ds_name)
+            for ds_name in ds_list:
+                ds = file[ds_name]
 
-                    dims_order = [vars_dict[ds_name]['dims'].index(dim) for dim in dims]
-                    dict1['dims_order'] = tuple(dims_order)
+                var_enc = encodings[ds_name]
 
-                    vars_dict[ds_name]['data'][i] = dict1
-                else:
-                    shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
+                dims = []
+                global_index = {}
+                local_index = {}
+                remove_ds = False
 
-                    if 'missing_value' in var_enc:
-                        fillvalue = var_enc['missing_value']
+                for dim in ds.dims:
+                    if isinstance(ds, xr.DataArray):
+                        dim_name = dim
+                        dim_data = encode_data(ds[dim_name].values, **encodings[dim_name])
                     else:
-                        fillvalue = None
+                        dim_name = dim[0].name.split('/')[-1]
+                        if dim[0].dtype.name == 'object':
+                            dim_data = dim[0][:].astype(str).astype(h5py.string_dtype())
+                        else:
+                            dim_data = dim[0][:]
 
-                    vars_dict[ds_name] = {'data': {i: dict1}, 'dims': tuple(dims), 'shape': shape, 'dtype': var_enc['dtype'], 'fillvalue': fillvalue, 'dtype_decoded': var_enc['dtype_decoded']}
+                    dims.append(dim_name)
 
-        file.close()
+                    # if dim_name == 'lon':
+                    #     break
+
+                    # global_arr_index = np.searchsorted(coords_dict[dim_name], dim_data)
+                    # local_arr_index = np.isin(dim_data, coords_dict[dim_name], assume_unique=True).nonzero()[0]
+                    values, global_arr_index, local_arr_index = np.intersect1d(coords_dict[dim_name], dim_data, assume_unique=True, return_indices=True)
+
+                    if len(global_arr_index) > 0:
+
+                        global_index[dim_name] = global_arr_index
+                        local_index[dim_name] = local_arr_index
+                    else:
+                        remove_ds = True
+                        break
+
+                if remove_ds:
+                    if ds_name in vars_dict:
+                        if i in vars_dict[ds_name]['data']:
+                            del vars_dict[ds_name]['data'][i]
+
+                else:
+                    dict1 = {'dims_order': tuple(i for i in range(len(dims))), 'global_index': global_index, 'local_index': local_index}
+
+                    if ds_name in vars_dict:
+                        if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
+                            raise ValueError('dims are not consistant between the same named dataset: ' + ds_name)
+                        # if vars_dict[ds_name]['dtype'] != ds.dtype:
+                        #     raise ValueError('dtypes are not consistant between the same named dataset: ' + ds_name)
+
+                        dims_order = [vars_dict[ds_name]['dims'].index(dim) for dim in dims]
+                        dict1['dims_order'] = tuple(dims_order)
+
+                        vars_dict[ds_name]['data'][i] = dict1
+                    else:
+                        shape = tuple([coords_dict[dim_name].shape[0] for dim_name in dims])
+
+                        if 'missing_value' in var_enc:
+                            fillvalue = var_enc['missing_value']
+                        else:
+                            fillvalue = None
+
+                        vars_dict[ds_name] = {'data': {i: dict1}, 'dims': tuple(dims), 'shape': shape, 'dtype': var_enc['dtype'], 'fillvalue': fillvalue, 'dtype_decoded': var_enc['dtype_decoded']}
 
     return vars_dict
 
@@ -636,13 +633,17 @@ def fill_chunks_by_files(ds, files, ds_vars, var_name, group, encodings):
         for i_file, data in ds_vars['data'].items():
             # if i_file == 9:
             #     break
-            g_index = [(chunk[i].start <= gi) & (gi < chunk[i].stop) for i, gi in enumerate(data['global_index'].values())]
-            bool1 = all([a.any() for a in g_index])
+            g_bool_index = [(chunk[i].start <= gi) & (gi < chunk[i].stop) for i, gi in enumerate(data['global_index'].values())]
+            bool1 = all([a.any() for a in g_bool_index])
             if bool1:
                 l_slices = {}
                 for i, dim in enumerate(dims):
-                    w = np.where(g_index[i])[0]
-                    l_slices[dim] = slice(data['local_index'][dim][min(w)], data['local_index'][dim][max(w)] + 1, None)
+                    w = g_bool_index[i]
+                    l_index = data['local_index'][dim][w]
+                    if is_regular_index(l_index):
+                        l_slices[dim] = slice(l_index[0], l_index[-1] + 1, None)
+                    else:
+                        l_slices[dim] = l_index
 
                 if tuple(range(len(dims))) == data['dims_order']:
                     transpose_order = None
@@ -660,8 +661,8 @@ def fill_chunks_by_files(ds, files, ds_vars, var_name, group, encodings):
 
                     g_chunk_index = []
                     for i, dim in enumerate(dims):
-                        s1 = data['global_index'][dim][g_index[i]] - chunk[i].start
-                        if (s1[-1] - s1[0] + 1) == len(s1):
+                        s1 = data['global_index'][dim][g_bool_index[i]] - chunk[i].start
+                        if is_regular_index(s1):
                             s1 = slice(s1[0], s1[-1] + 1, None)
                         g_chunk_index.append(s1)
                     chunk_arr[tuple(g_chunk_index)] = l_data
