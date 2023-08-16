@@ -10,7 +10,7 @@ here = os.path.abspath(os.path.dirname(__file__))
 name = 'hdf5tools'
 main_package = 'hdf5tools'
 datasets = 'datasets'
-version = '0.2.1'
+version = '0.2.2'
 descrip = 'Python hdf5 tools'
 
 # The below code is for readthedocs. To have sphinx/readthedocs interact with

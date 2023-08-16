@@ -625,10 +625,14 @@ def fill_chunks_by_files(ds, files, ds_vars, var_name, group, encodings):
 
     """
     dims = ds_vars['dims']
+    if ds_vars['fillvalue'] is None:
+        fillvalue = -99
+    else:
+        fillvalue = ds_vars['fillvalue']
 
     for chunk in ds.iter_chunks():
         chunk_size1 = tuple(c.stop - c.start for c in chunk)
-        chunk_arr = np.full(chunk_size1, fill_value=ds_vars['fillvalue'], dtype=ds_vars['dtype'], order='C')
+        chunk_arr = np.full(chunk_size1, fill_value=fillvalue, dtype=ds_vars['dtype'], order='C')
         for i_file, data in ds_vars['data'].items():
             # if i_file == 9:
             #     break
