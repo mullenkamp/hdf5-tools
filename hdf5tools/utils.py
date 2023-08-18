@@ -633,7 +633,7 @@ def fill_chunks_by_files(ds, files, ds_vars, var_name, group, encodings):
         for i_file, data in ds_vars['data'].items():
             # if i_file == 9:
             #     break
-            g_bool_index = [(chunk[i].start <= gi) & (gi < chunk[i].stop) for i, gi in enumerate(data['global_index'].values())]
+            g_bool_index = [(chunk[i].start <= data['global_index'][dim]) & (data['global_index'][dim] < chunk[i].stop) for i, dim in enumerate(dims)]
             bool1 = all([a.any() for a in g_bool_index])
             if bool1:
                 l_slices = {}
