@@ -300,7 +300,7 @@ class H5(object):
             compressor = utils.get_compressor(compression)
 
             ## Create new file
-            with h5py.File(output, 'w', libver='v110', rdcc_nbytes=3*1024*1024, track_order=True) as nf:
+            with h5py.File(output, 'w', libver='earliest', rdcc_nbytes=3*1024*1024, track_order=True) as nf:
 
                 if isinstance(group, str):
                     nf1 = nf.create_group(group, track_order=True)

@@ -1,5 +1,5 @@
 {% set name = "hdf5tools" %}
-{% set version = "0.2.4" %}
+{% set version = "0.2.5" %}
 # {% set sha256 = "ae2cc83fb5a75e8dc3e1b2c2137deea412c8a4c7c9acca52bf4ec59de52a80c9" %}
 
 # sha256 is the prefered checksum -- you can get it for a file with:
@@ -34,6 +34,7 @@ requirements:
   build:
     - python >=3.8
     - setuptools
+    - hatchling
   run:
     - python >=3.8
     - xarray >=2022.03.0
