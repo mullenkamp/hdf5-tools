@@ -100,6 +100,7 @@ for ds_id in ds_ids:
     before = xr_concat([xr.open_dataset(f, engine='h5netcdf') for f in files if ds_id in f])
     before_dict[ds_id] = before
 
+
 # for ds_id in ds_ids:
 #     ds_files = [xr.open_dataset(f, engine='h5netcdf') for f in files if ds_id in f]
 #     h1 = H5(ds_files)

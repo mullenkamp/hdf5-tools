@@ -245,20 +245,18 @@ def get_attrs(files, group):
     global_attrs = {}
     attrs = {}
     for i, file1 in enumerate(files):
-        file = open_file(file1, group)
-        global_attrs.update(dict(file.attrs))
+        with open_file(file1, group) as file:
+            global_attrs.update(dict(file.attrs))
 
-        # file_attrs[i] = {}
-        for name in file:
-            attr = {f: v for f, v in file[name].attrs.items() if (f not in enc_fields) and (f not in ['DIMENSION_LABELS', 'DIMENSION_LIST', 'CLASS', 'NAME', '_Netcdf4Coordinates', '_Netcdf4Dimid', 'REFERENCE_LIST'])}
-            # file_attrs[i].update({name: attr})
+            # file_attrs[i] = {}
+            for name in file:
+                attr = {f: v for f, v in file[name].attrs.items() if (f not in enc_fields) and (f not in ['DIMENSION_LABELS', 'DIMENSION_LIST', 'CLASS', 'NAME', '_Netcdf4Coordinates', '_Netcdf4Dimid', 'REFERENCE_LIST'])}
+                # file_attrs[i].update({name: attr})
 
-            if name in attrs:
-                attrs[name].update(attr)
-            else:
-                attrs[name] = attr
-
-        file.close()
+                if name in attrs:
+                    attrs[name].update(attr)
+                else:
+                    attrs[name] = attr
 
     return attrs, global_attrs
 
@@ -348,6 +346,7 @@ def index_variables(files, coords_dict, encodings, group):
 
     """
     vars_dict = {}
+    is_regular_dict = {}
 
     for i, file1 in enumerate(files):
         with open_file(file1, group) as file:
@@ -358,6 +357,9 @@ def index_variables(files, coords_dict, encodings, group):
                 ds_list = list(file.data_vars)
             else:
                 ds_list = [ds_name for ds_name in file.keys() if not is_scale(file[ds_name])]
+
+            ## Made False for now...should be True if I implement this...
+            _ = [is_regular_dict.update({ds_name: False}) for ds_name in ds_list if ds_name not in is_regular_dict]
 
             for ds_name in ds_list:
                 ds = file[ds_name]
@@ -382,9 +384,6 @@ def index_variables(files, coords_dict, encodings, group):
 
                     dims.append(dim_name)
 
-                    # if dim_name == 'lon':
-                    #     break
-
                     # global_arr_index = np.searchsorted(coords_dict[dim_name], dim_data)
                     # local_arr_index = np.isin(dim_data, coords_dict[dim_name], assume_unique=True).nonzero()[0]
                     values, global_arr_index, local_arr_index = np.intersect1d(coords_dict[dim_name], dim_data, assume_unique=True, return_indices=True)
@@ -393,6 +392,10 @@ def index_variables(files, coords_dict, encodings, group):
 
                         global_index[dim_name] = global_arr_index
                         local_index[dim_name] = local_arr_index
+
+                        ## Turned off for now...
+                        # if not is_regular_index(global_arr_index):
+                        #     is_regular_dict[ds_name] = False
                     else:
                         remove_ds = True
                         break
@@ -425,7 +428,7 @@ def index_variables(files, coords_dict, encodings, group):
 
                         vars_dict[ds_name] = {'data': {i: dict1}, 'dims': tuple(dims), 'shape': shape, 'dtype': var_enc['dtype'], 'fillvalue': fillvalue, 'dtype_decoded': var_enc['dtype_decoded']}
 
-    return vars_dict
+    return vars_dict, is_regular_dict
 
 
 def filter_coords(coords_dict, selection, encodings):
@@ -617,7 +620,7 @@ def get_compressor(name: str = None):
     return compressor
 
 
-def fill_chunks_by_files(ds, files, ds_vars, var_name, group, encodings):
+def fill_ds_by_chunks(ds, files, ds_vars, var_name, group, encodings):
     """
 
     """
@@ -670,6 +673,38 @@ def fill_chunks_by_files(ds, files, ds_vars, var_name, group, encodings):
         ## Save chunk to new dataset
         ds[chunk] = chunk_arr
 
+
+def fill_ds_by_files(ds, files, ds_vars, var_name, group, encodings):
+    """
+    Currently the implementation is simple. It loads one entire input file into the ds. It would be nice to chunk the file before loading to handle very large input files.
+    """
+    dims = ds_vars['dims']
+
+    for i_file, data in ds_vars['data'].items():
+        if tuple(range(len(dims))) == data['dims_order']:
+            transpose_order = None
+        else:
+            transpose_order = tuple(data['dims_order'].index(i) for i in range(len(data['dims_order'])))
+
+        g_chunk_slices = []
+        l_slices = []
+        for dim in dims:
+            g_index = data['global_index'][dim]
+            g_chunk_slices.append(slice(g_index[0], g_index[-1] + 1, None))
+
+            l_index = data['local_index'][dim]
+            l_slices.append(slice(l_index[0], l_index[-1] + 1, None))
+
+        with open_file(files[i_file], group) as f:
+            if isinstance(f, xr.Dataset):
+                l_data = encode_data(f[var_name][tuple(l_slices)].values, **encodings[var_name])
+            else:
+                l_data = f[var_name][tuple(l_slices)]
+
+            if transpose_order is not None:
+                l_data = l_data.transpose(transpose_order)
+
+            ds[tuple(g_chunk_slices)] = l_data
 
 
 
