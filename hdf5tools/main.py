@@ -78,7 +78,7 @@ class H5(object):
         coords_dict = utils.extend_coords(data1, encodings, group)
 
         ## Add the variables as datasets
-        vars_dict = utils.index_variables(data1, coords_dict, encodings, group)
+        vars_dict, is_regular_dict = utils.index_variables(data1, coords_dict, encodings, group)
 
         ## Assign attributes
         self._files = data1
@@ -88,6 +88,7 @@ class H5(object):
         self._attrs = attrs
         self._global_attrs = global_attrs
         self._encodings = encodings
+        self._is_regular_dict = is_regular_dict
 
 
     def _build_empty_ds(self):
@@ -163,9 +164,10 @@ class H5(object):
         c = self.copy()
         if selection is not None:
             utils.filter_coords(c._coords_dict, selection, self._encodings)
-            vars_dict = utils.index_variables(self._files, c._coords_dict, c._encodings, self._group)
+            vars_dict, is_regular_dict = utils.index_variables(self._files, c._coords_dict, c._encodings, self._group)
 
             c._data_vars_dict = vars_dict
+            c._is_regular_dict = is_regular_dict
 
         if include_coords is not None:
             coords_rem_list = []
@@ -300,7 +302,7 @@ class H5(object):
             compressor = utils.get_compressor(compression)
 
             ## Create new file
-            with h5py.File(output, 'w', libver='v110', rdcc_nbytes=3*1024*1024, track_order=True) as nf:
+            with h5py.File(output, 'w', libver='earliest', rdcc_nbytes=3*1024*1024, track_order=True) as nf:
 
                 if isinstance(group, str):
                     nf1 = nf.create_group(group, track_order=True)
@@ -384,8 +386,11 @@ class H5(object):
                                 else:
                                     ds[()] = ds_old[()]
                     else:
-                        # Save data by chunk for efficiency
-                        utils.fill_chunks_by_files(ds, self._files, ds_vars, var_name, self._group, self._encodings)
+                        # Save data
+                        if self._is_regular_dict[var_name]:
+                            utils.fill_ds_by_files(ds, self._files, ds_vars, var_name, self._group, self._encodings)
+                        else:
+                            utils.fill_ds_by_chunks(ds, self._files, ds_vars, var_name, self._group, self._encodings)
 
                 ## Assign attrs and encodings
                 for ds_name, attr in self._attrs.items():
