@@ -25,7 +25,7 @@ import hdf5plugin
 
 CHUNK_BASE = 32*1024    # Multiplier by which chunks are adjusted
 CHUNK_MIN = 32*1024      # Soft lower limit (32k)
-CHUNK_MAX = 3*1024*1024   # Hard upper limit (4M)
+CHUNK_MAX = 3*1024**2   # Hard upper limit (4M)
 
 time_str_conversion = {'days': 'datetime64[D]',
                        'hours': 'datetime64[h]',
@@ -37,8 +37,99 @@ enc_fields = ('units', 'calendar', 'dtype', 'missing_value', '_FillValue', 'add_
 
 missing_value_dict = {'int8': -128, 'int16': -32768, 'int32': -2147483648, 'int64': -9223372036854775808}
 
+
+#########################################################
+### Classes
+
+
+class ChunkIterator:
+    """
+    Class to iterate through list of chunks of a given dataset
+    """
+    def __init__(self, chunks, shape, source_sel=None):
+        self._shape = shape
+        rank = len(shape)
+
+        # if not dset.chunks:
+        #     # can only use with chunked datasets
+        #     raise TypeError("Chunked dataset required")
+
+        self._layout = chunks
+        if source_sel is None:
+            # select over entire dataset
+            slices = []
+            for dim in range(rank):
+                slices.append(slice(0, self._shape[dim]))
+            self._sel = tuple(slices)
+        else:
+            if isinstance(source_sel, slice):
+                self._sel = (source_sel,)
+            else:
+                self._sel = source_sel
+        if len(self._sel) != rank:
+            raise ValueError("Invalid selection - selection region must have same rank as dataset")
+        self._chunk_index = []
+        for dim in range(rank):
+            s = self._sel[dim]
+            if s.start < 0 or s.stop > self._shape[dim] or s.stop <= s.start:
+                raise ValueError("Invalid selection - selection region must be within dataset space")
+            index = s.start // self._layout[dim]
+            self._chunk_index.append(index)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        rank = len(self._shape)
+        slices = []
+        if rank == 0 or self._chunk_index[0] * self._layout[0] >= self._sel[0].stop:
+            # ran past the last chunk, end iteration
+            raise StopIteration()
+
+        for dim in range(rank):
+            s = self._sel[dim]
+            start = self._chunk_index[dim] * self._layout[dim]
+            stop = (self._chunk_index[dim] + 1) * self._layout[dim]
+            # adjust the start if this is an edge chunk
+            if start < s.start:
+                start = s.start
+            if stop > s.stop:
+                stop = s.stop  # trim to end of the selection
+            s = slice(start, stop, 1)
+            slices.append(s)
+
+        # bump up the last index and carry forward if we run outside the selection
+        dim = rank - 1
+        while dim >= 0:
+            s = self._sel[dim]
+            self._chunk_index[dim] += 1
+
+            chunk_end = self._chunk_index[dim] * self._layout[dim]
+            if chunk_end < s.stop:
+                # we still have room to extend along this dimensions
+                return tuple(slices)
+
+            if dim > 0:
+                # reset to the start and continue iterating with higher dimension
+                self._chunk_index[dim] = 0
+            dim -= 1
+        return tuple(slices)
+
+
 #########################################################
 ### Functions
+
+
+def product(nums):
+    """Calculate a numeric product
+
+    For small amounts of data (e.g. shape tuples), this simple code is much
+    faster than calling numpy.prod().
+    """
+    prod = 1
+    for n in nums:
+        prod *= n
+    return prod
 
 
 def encode_datetime(data, units=None, calendar='gregorian'):
@@ -274,7 +365,8 @@ def is_regular_index(arr_index):
     """
 
     """
-    reg_bool = np.all(np.diff(arr_index) == 1) or len(arr_index) == 1
+    # reg_bool = np.all(np.diff(arr_index) == 1) or len(arr_index) == 1
+    reg_bool = (np.sum(np.diff(arr_index)) == (len(arr_index) - 1)) or len(arr_index) == 1
 
     return reg_bool
 
@@ -358,8 +450,7 @@ def index_variables(files, coords_dict, encodings, group):
             else:
                 ds_list = [ds_name for ds_name in file.keys() if not is_scale(file[ds_name])]
 
-            ## Made False for now...should be True if I implement this...
-            _ = [is_regular_dict.update({ds_name: False}) for ds_name in ds_list if ds_name not in is_regular_dict]
+            _ = [is_regular_dict.update({ds_name: True}) for ds_name in ds_list if ds_name not in is_regular_dict]
 
             for ds_name in ds_list:
                 ds = file[ds_name]
@@ -393,9 +484,9 @@ def index_variables(files, coords_dict, encodings, group):
                         global_index[dim_name] = global_arr_index
                         local_index[dim_name] = local_arr_index
 
-                        ## Turned off for now...
-                        # if not is_regular_index(global_arr_index):
-                        #     is_regular_dict[ds_name] = False
+                        if is_regular_dict[ds_name]:
+                            if (not is_regular_index(global_arr_index)) or (not is_regular_index(local_arr_index)):
+                                is_regular_dict[ds_name] = False
                     else:
                         remove_ds = True
                         break
@@ -481,15 +572,16 @@ def filter_coords(coords_dict, selection, encodings):
         coords_dict[coord] = new_coord_data
 
 
-def guess_chunk(shape, maxshape, dtype):
+def guess_chunk(shape, maxshape, dtype, chunk_max=3*2**20):
     """ Guess an appropriate chunk layout for a dataset, given its shape and
     the size of each element in bytes.  Will allocate chunks only as large
     as MAX_SIZE.  Chunks are generally close to some power-of-2 fraction of
     each axis, slightly favoring bigger values for the last index.
     Undocumented and subject to change without warning.
     """
+    ndims = len(shape)
 
-    if len(shape) > 0:
+    if ndims > 0:
 
         # For unlimited dimensions we have to guess 1024
         shape1 = []
@@ -504,9 +596,9 @@ def guess_chunk(shape, maxshape, dtype):
 
         shape = tuple(shape1)
 
-        ndims = len(shape)
-        if ndims == 0:
-            raise ValueError("Chunks not allowed for scalar datasets.")
+        # ndims = len(shape)
+        # if ndims == 0:
+        #     raise ValueError("Chunks not allowed for scalar datasets.")
 
         chunks = np.array(shape, dtype='=f8')
         if not np.all(np.isfinite(chunks)):
@@ -523,7 +615,7 @@ def guess_chunk(shape, maxshape, dtype):
         # elif target_size < CHUNK_MIN:
         #     target_size = CHUNK_MIN
 
-        target_size = CHUNK_MAX
+        target_size = chunk_max
 
         idx = 0
         while True:
@@ -532,15 +624,14 @@ def guess_chunk(shape, maxshape, dtype):
             # 1b. We're within 50% of the target chunk size, AND
             #  2. The chunk is smaller than the maximum chunk size
 
-            chunk_bytes = np.prod(chunks)*typesize
+            chunk_bytes = product(chunks)*typesize
 
             if (chunk_bytes < target_size or \
-             abs(chunk_bytes-target_size)/target_size < 0.5) and \
-             chunk_bytes < CHUNK_MAX:
+             abs(chunk_bytes - target_size)/target_size < 0.5):
                 break
 
-            if np.prod(chunks) == 1:
-                break  # Element size larger than CHUNK_MAX
+            # if np.prod(chunks) == 1:
+            #     break  # Element size larger than CHUNK_MAX
 
             chunks[idx%ndims] = np.ceil(chunks[idx%ndims] / 2.0)
             idx += 1
@@ -606,6 +697,7 @@ def get_compressor(name: str = None):
     """
 
     """
+    name = name.lower()
     if name is None:
         compressor = {}
     elif name == 'gzip':
@@ -614,8 +706,10 @@ def get_compressor(name: str = None):
         compressor = {'compression': name}
     elif name == 'zstd':
         compressor = hdf5plugin.Zstd(1)
+    elif name == 'lz4':
+        compressor = hdf5plugin.LZ4()
     else:
-        raise ValueError('name must be one of gzip, lzf, zstd, or None.')
+        raise ValueError('name must be one of gzip, lzf, zstd, lz4, or None.')
 
     return compressor
 
@@ -679,32 +773,44 @@ def fill_ds_by_files(ds, files, ds_vars, var_name, group, encodings):
     Currently the implementation is simple. It loads one entire input file into the ds. It would be nice to chunk the file before loading to handle very large input files.
     """
     dims = ds_vars['dims']
+    dtype = ds_vars['dtype']
 
     for i_file, data in ds_vars['data'].items():
+        dims_order = data['dims_order']
+        g_index_start = tuple(data['global_index'][dim][0] for dim in dims)
+
         if tuple(range(len(dims))) == data['dims_order']:
             transpose_order = None
         else:
-            transpose_order = tuple(data['dims_order'].index(i) for i in range(len(data['dims_order'])))
+            transpose_order = tuple(dims_order.index(i) for i in range(len(dims_order)))
+            g_index_start = tuple(g_index_start[i] for i in dims_order)
 
-        g_chunk_slices = []
-        l_slices = []
-        for dim in dims:
-            g_index = data['global_index'][dim]
-            g_chunk_slices.append(slice(g_index[0], g_index[-1] + 1, None))
-
-            l_index = data['local_index'][dim]
-            l_slices.append(slice(l_index[0], l_index[-1] + 1, None))
+        file_shape = tuple(len(arr) for dim, arr in data['local_index'].items())
+        chunk_size = guess_chunk(file_shape, file_shape, dtype, 2**27)
+        chunk_iter = ChunkIterator(chunk_size, file_shape)
 
         with open_file(files[i_file], group) as f:
-            if isinstance(f, xr.Dataset):
-                l_data = encode_data(f[var_name][tuple(l_slices)].values, **encodings[var_name])
-            else:
-                l_data = f[var_name][tuple(l_slices)]
+            for chunk in chunk_iter:
+                # g_chunk_slices = []
+                # l_slices = []
+                # for dim in dims:
+                #     g_index = data['global_index'][dim]
+                #     g_chunk_slices.append(slice(g_index[0], g_index[-1] + 1, None))
 
-            if transpose_order is not None:
-                l_data = l_data.transpose(transpose_order)
+                #     l_index = data['local_index'][dim]
+                #     l_slices.append(slice(l_index[0], l_index[-1] + 1, None))
 
-            ds[tuple(g_chunk_slices)] = l_data
+                if isinstance(f, xr.Dataset):
+                    l_data = encode_data(f[var_name][chunk].values, **encodings[var_name])
+                else:
+                    l_data = f[var_name][chunk]
+
+                if transpose_order is not None:
+                    l_data = l_data.transpose(transpose_order)
+
+                g_chunk_slices = tuple(slice(g_index_start[i] + s.start, g_index_start[i] + s.stop, 1) for i, s in enumerate(chunk))
+
+                ds[g_chunk_slices] = l_data
 
 
 

@@ -269,7 +269,7 @@ class H5(object):
         return coords_summ
 
 
-    def to_hdf5(self, output: Union[str, pathlib.Path, io.BytesIO], group=None, chunks=None, unlimited_dims=None, compression='zstd'):
+    def to_hdf5(self, output: Union[str, pathlib.Path, io.BytesIO], group=None, chunks=None, unlimited_dims=None, compression='zstd', libver='earliest'):
         """
         Method to output the filtered data to an HDF5 file or file object.
 
@@ -285,6 +285,7 @@ class H5(object):
             The dimensions/coordinates that should be assigned as "unlimited" in the hdf5 file.
         compression : str or None
             The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd requires the hdf5plugin python package, but is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
+        libver : The hdf5 library version according to h5py. This is for advanced users only. https://docs.h5py.org/en/stable/high/file.html#version-bounding.
 
         Returns
         -------
@@ -302,7 +303,7 @@ class H5(object):
             compressor = utils.get_compressor(compression)
 
             ## Create new file
-            with h5py.File(output, 'w', libver='earliest', rdcc_nbytes=3*1024*1024, track_order=True) as nf:
+            with h5py.File(output, 'w', libver=libver, rdcc_nbytes=3*1024*1024, track_order=True) as nf:
 
                 if isinstance(group, str):
                     nf1 = nf.create_group(group, track_order=True)
@@ -375,6 +376,9 @@ class H5(object):
 
                     ds_vars = vars_dict[var_name]
 
+                    n_files = len(ds_vars['data'])
+                    mean_ds_file_size = utils.product(shape)/n_files
+
                     # Load data by file if no chunks are assigned
                     if ds.chunks is None:
                         for i in ds_vars['data']:
@@ -386,9 +390,10 @@ class H5(object):
                                 else:
                                     ds[()] = ds_old[()]
                     else:
-                        # Save data
-                        if self._is_regular_dict[var_name]:
+                        # If files are big and regular fill by file
+                        if self._is_regular_dict[var_name] and (mean_ds_file_size > (3 * utils.product(ds.chunks))):
                             utils.fill_ds_by_files(ds, self._files, ds_vars, var_name, self._group, self._encodings)
+                        # Otherwise fill by chunk
                         else:
                             utils.fill_ds_by_chunks(ds, self._files, ds_vars, var_name, self._group, self._encodings)
 
