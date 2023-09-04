@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hdf5tools"
-version = '0.2.5'
+version = '0.3.0'
 description = "Python hdf5 tools"
 readme = "README.rst"
 license = "Apache-2.0"
