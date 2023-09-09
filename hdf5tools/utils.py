@@ -630,8 +630,8 @@ def guess_chunk(shape, maxshape, dtype, chunk_max=3*2**20):
              abs(chunk_bytes - target_size)/target_size < 0.5):
                 break
 
-            # if np.prod(chunks) == 1:
-            #     break  # Element size larger than CHUNK_MAX
+            if np.prod(chunks) == 1:
+                break
 
             chunks[idx%ndims] = np.ceil(chunks[idx%ndims] / 2.0)
             idx += 1

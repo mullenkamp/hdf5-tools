@@ -68,6 +68,13 @@ class H5(object):
         else:
             data1 = [data]
 
+        ## If input data are xr datasets, then sort the coordinates
+        for i, f in enumerate(data1):
+            if isinstance(f, xr.Dataset):
+                coords = list(f.coords)
+                f = f.sortby(coords)
+                data1[i] = f
+
         ## Get encodings
         encodings = utils.get_encodings(data1, group)
 
