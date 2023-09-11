@@ -14,6 +14,7 @@ import xarray as xr
 # from time import time
 # from datetime import datetime
 import cftime
+import math
 # import dateutil.parser as dparser
 # import numcodecs
 import hdf5plugin
@@ -118,6 +119,28 @@ class ChunkIterator:
 
 #########################################################
 ### Functions
+
+
+def compute_scale_and_offset(min_value, max_value, dtype):
+    """
+    Computes the scale_factor and offset for the dataset using a min value and max value, and int n
+    """
+    bits = dtype.itemsize * 8
+    data_range = max_value - min_value
+    if bits < 64:
+        target_range = 2**bits - 2
+        target_min = -(2**(bits - 1) - 1)
+        slope = data_range / target_range
+    else:
+        data_power = int(math.log10(data_range))
+        target_range = 2**bits
+        target_power = int(math.log10(target_range))
+        target_min = -10**(target_power - 1)
+        slope = 10**-(target_power - data_power)
+
+    offset = min_value - (slope*target_min)
+
+    return slope, offset
 
 
 def product(nums):
@@ -246,6 +269,7 @@ def get_encoding(data):
 
     if 'dtype' not in encoding:
         if np.issubdtype(data.dtype, np.floating):
+            # scale, offset = compute_scale_and_offset(min_value, max_value, n)
             raise ValueError('float dtypes must have encoding data to encode to int.')
         encoding['dtype'] = data.dtype
     elif isinstance(encoding['dtype'], str):
@@ -424,6 +448,13 @@ def extend_coords(files, encodings, group):
                         data = ds[:].astype(str).astype(h5py.string_dtype())
                     else:
                         data = ds[:]
+
+                # Check for nan values in numeric types
+                dtype = data.dtype
+                if np.issubdtype(dtype, np.integer):
+                    nan_value = missing_value_dict[dtype.name]
+                    if nan_value in data:
+                        raise ValueError(f'{ds_name} has nan values. Floats and integers coordinates cannot have nan values. Check the encoding values if the original values are floats.')
 
                 if ds_name in coords_dict:
                     coords_dict[ds_name] = np.union1d(coords_dict[ds_name], data)
@@ -630,8 +661,8 @@ def guess_chunk(shape, maxshape, dtype, chunk_max=3*2**20):
              abs(chunk_bytes - target_size)/target_size < 0.5):
                 break
 
-            # if np.prod(chunks) == 1:
-            #     break  # Element size larger than CHUNK_MAX
+            if np.prod(chunks) == 1:
+                break
 
             chunks[idx%ndims] = np.ceil(chunks[idx%ndims] / 2.0)
             idx += 1
@@ -697,16 +728,16 @@ def get_compressor(name: str = None):
     """
 
     """
-    name = name.lower()
+    name1 = name.lower()
     if name is None:
         compressor = {}
-    elif name == 'gzip':
+    elif name1 == 'gzip':
         compressor = {'compression': name}
-    elif name == 'lzf':
+    elif name1 == 'lzf':
         compressor = {'compression': name}
-    elif name == 'zstd':
+    elif name1 == 'zstd':
         compressor = hdf5plugin.Zstd(1)
-    elif name == 'lz4':
+    elif name1 == 'lz4':
         compressor = hdf5plugin.LZ4()
     else:
         raise ValueError('name must be one of gzip, lzf, zstd, lz4, or None.')
