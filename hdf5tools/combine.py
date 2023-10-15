@@ -32,7 +32,7 @@ import copy
 ### Class
 
 
-class H5(object):
+class Combine(object):
     """
     Class to load and combine one or more HDF5 data files (or xarray datasets) with optional filters. The class will then export the combined data to an HDF5 file, file object, or xr.Dataset.
 
@@ -467,7 +467,7 @@ def xr_to_hdf5(data: Union[List[xr.Dataset], xr.Dataset], output: Union[str, pat
     -------
     None
     """
-    H5(data).to_hdf5(output, group, chunks, unlimited_dims, compression)
+    Combine(data).to_hdf5(output, group, chunks, unlimited_dims, compression)
 
 
 
