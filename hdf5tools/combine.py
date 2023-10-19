@@ -440,6 +440,9 @@ class Combine(object):
         return xr_ds
 
 
+## Backwards compatibility
+H5 = Combine
+
 ################################################
 ### Convenience functions
 

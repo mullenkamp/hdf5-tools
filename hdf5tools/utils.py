@@ -672,6 +672,62 @@ def guess_chunk(shape, maxshape, dtype, chunk_max=3*2**20):
         return None
 
 
+def guess_chunk_time(shape, maxshape, dtype, time_index, chunk_max=3*2**20):
+    """ Guess an appropriate chunk layout for a dataset, given its shape and
+    the size of each element in bytes.  Will allocate chunks only as large
+    as MAX_SIZE.  Chunks are generally close to some power-of-2 fraction of
+    each axis, slightly favoring bigger values for the last index.
+    Undocumented and subject to change without warning.
+    """
+    ndims = len(shape)
+
+    if ndims > 0:
+
+        # For unlimited dimensions we have to guess 1024
+        shape1 = []
+        for i, x in enumerate(maxshape):
+            if x is None:
+                if shape[i] > 1024:
+                    shape1.append(shape[i])
+                else:
+                    shape1.append(1024)
+            else:
+                shape1.append(x)
+
+        shape = tuple(shape1)
+
+        chunks = np.array(shape, dtype='=f8')
+        if not np.all(np.isfinite(chunks)):
+            raise ValueError("Illegal value in chunk tuple")
+
+        # Determine the optimal chunk size in bytes using a PyTables expression.
+        # This is kept as a float.
+        typesize = dtype.itemsize
+
+        target_size = chunk_max
+
+        while True:
+            # Repeatedly loop over the axes, dividing them by 2.  Stop when:
+            # 1a. We're smaller than the target chunk size, OR
+            # 1b. We're within 50% of the target chunk size, AND
+            #  2. The chunk is smaller than the maximum chunk size
+
+            chunk_bytes = product(chunks)*typesize
+
+            if (chunk_bytes < target_size or \
+             abs(chunk_bytes - target_size)/target_size < 0.5):
+                break
+
+            if chunks[time_index] == 1:
+                break
+
+            chunks[time_index] = np.ceil(chunks[time_index] / 2.0)
+
+        return tuple(int(x) for x in chunks)
+    else:
+        return None
+
+
 def cartesian(arrays, out=None):
     """
     Generate a cartesian product of input arrays.
