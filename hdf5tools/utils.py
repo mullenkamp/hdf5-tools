@@ -389,7 +389,6 @@ def is_regular_index(arr_index):
     """
 
     """
-    # reg_bool = np.all(np.diff(arr_index) == 1) or len(arr_index) == 1
     reg_bool = (np.sum(np.diff(arr_index)) == (len(arr_index) - 1)) or len(arr_index) == 1
 
     return reg_bool
@@ -898,7 +897,6 @@ def fill_ds_by_files(ds, files, ds_vars, var_name, group, encodings):
                 g_chunk_slices = tuple(slice(g_index_start[i] + s.start, g_index_start[i] + s.stop, 1) for i, s in enumerate(chunk))
 
                 ds[g_chunk_slices] = l_data
-
 
 
 
