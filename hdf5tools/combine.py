@@ -326,7 +326,12 @@ class Combine(object):
                         if coord in chunks:
                             chunks1 = chunks[coord]
 
-                    ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=dtype, track_order=True, **compressor)
+                    if dtype == 'object':
+                        coord_dtype = h5py.string_dtype()
+                    else:
+                        coord_dtype = dtype
+
+                    ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=coord_dtype, track_order=True, **compressor)
 
                     ds[:] = arr
 
@@ -361,7 +366,12 @@ class Combine(object):
                     else:
                         compressor1 = compressor
 
-                    ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[var_name]['dtype'], fillvalue=vars_dict[var_name]['fillvalue'], track_order=True, **compressor1)
+                    if vars_dict[var_name]['dtype'] == 'object':
+                        ds_dtype = h5py.string_dtype()
+                    else:
+                        ds_dtype = vars_dict[var_name]['dtype']
+
+                    ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=ds_dtype, fillvalue=vars_dict[var_name]['fillvalue'], track_order=True, **compressor1)
 
                     for i, dim in enumerate(dims):
                         ds.dims[i].attach_scale(nf1[dim])
@@ -405,8 +415,6 @@ class Combine(object):
                 for ds_name, encs in self._encodings.items():
                     if ds_name in nf1:
                         for f, enc in encs.items():
-                            if 'dtype' in f:
-                                enc = enc.name
                             nf1[ds_name].attrs.update({f: enc})
 
                 # nf1.attrs['_NCProperties'] = b'version=2,hdf5=1.12.2,h5py=3.7.0'

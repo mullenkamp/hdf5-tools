@@ -34,9 +34,11 @@ time_str_conversion = {'days': 'datetime64[D]',
                        'seconds': 'datetime64[s]',
                        'milliseconds': 'datetime64[ms]'}
 
-enc_fields = ('units', 'calendar', 'dtype', 'missing_value', '_FillValue', 'add_offset', 'scale_factor')
+enc_fields = ('units', 'calendar', 'dtype', 'missing_value', '_FillValue', 'add_offset', 'scale_factor', 'dtype_decoded', 'compression')
 
 missing_value_dict = {'int8': -128, 'int16': -32768, 'int32': -2147483648, 'int64': -9223372036854775808}
+
+ignore_attrs = ('DIMENSION_LIST', 'DIMENSION_LABELS', 'DIMENSION_SCALE', 'REFERENCE_LIST', 'CLASS', 'NAME', '_Netcdf4Coordinates', '_Netcdf4Dimid')
 
 
 #########################################################
@@ -201,7 +203,7 @@ def encode_data(data, dtype, missing_value=None, add_offset=0, scale_factor=None
         if isinstance(missing_value, (int, np.number)):
             data[np.isnan(data)] = missing_value
 
-    if (data.dtype != dtype) or (data.dtype.name == 'object'):
+    if (data.dtype.name != dtype) or (data.dtype.name == 'object'):
         data = data.astype(dtype)
 
     return data
@@ -222,67 +224,78 @@ def decode_data(data, dtype_decoded, missing_value=None, add_offset=0, scale_fac
 
         data = (data * scale_factor) + add_offset
 
-    # elif (data.dtype.name == 'object'):
-    #     data = data.astype(str).astype(dtype_decoded)
-
-    elif (data.dtype != dtype_decoded) or (data.dtype.name == 'object'):
+    elif (data.dtype.name != dtype_decoded) or (data.dtype.name == 'object'):
         data = data.astype(dtype_decoded)
 
     return data
 
 
-def get_encoding(data):
+def get_encoding_data_from_h5py_attrs(attrs: h5py.AttributeManager):
     """
 
     """
-    if isinstance(data, xr.DataArray):
-        encoding = {f: v for f, v in data.encoding.items() if f in enc_fields}
-    else:
-        encoding = {}
-        for f, v in data.attrs.items():
-            if f in enc_fields:
-                if isinstance(v, bytes):
-                    encoding[f] = v.decode()
-                elif isinstance(v, np.ndarray):
-                    if len(v) == 1:
-                        encoding[f] = v[0]
-                    else:
-                        raise ValueError('encoding is an ndarray with len > 1.')
+    encoding = {}
+    for f, v in attrs.items():
+        if f in enc_fields:
+            if isinstance(v, bytes):
+                encoding[f] = v.decode()
+            elif isinstance(v, np.ndarray):
+                if len(v) == 1:
+                    encoding[f] = v[0]
                 else:
-                    encoding[f] = v
+                    raise ValueError('encoding is an ndarray with len > 1.')
+            else:
+                encoding[f] = v
 
-    if (data.dtype.name == 'object') or ('str' in data.dtype.name):
-        encoding['dtype'] = h5py.string_dtype()
-    elif ('datetime64' in data.dtype.name): # which means it's an xr.DataArray
-        encoding['dtype'] = np.dtype('int64')
+    return encoding
+
+
+def get_encoding_data_from_xr(xr_encoding):
+    """
+
+    """
+    encoding = {f: v for f, v in xr_encoding.items() if f in enc_fields}
+
+    return encoding
+
+
+def process_encoding(encoding, dtype):
+    """
+
+    """
+    if (dtype.name == 'object') or ('str' in dtype.name):
+        # encoding['dtype'] = h5py.string_dtype()
+        encoding['dtype'] = 'object'
+    elif ('datetime64' in dtype.name): # which means it's an xr.DataArray
+        encoding['dtype'] = 'int64'
         encoding['calendar'] = 'gregorian'
         encoding['units'] = 'seconds since 1970-01-01 00:00:00'
         encoding['missing_value'] = missing_value_dict['int64']
         encoding['_FillValue'] = encoding['missing_value']
 
     elif ('calendar' in encoding): # Which means it's not an xr.DataArray
-        encoding['dtype'] = np.dtype('int64')
+        encoding['dtype'] = 'int64'
         if 'units' not in encoding:
             encoding['units'] = 'seconds since 1970-01-01 00:00:00'
         encoding['missing_value'] = missing_value_dict['int64']
         encoding['_FillValue'] = encoding['missing_value']
 
     if 'dtype' not in encoding:
-        if np.issubdtype(data.dtype, np.floating):
+        if np.issubdtype(dtype, np.floating):
             # scale, offset = compute_scale_and_offset(min_value, max_value, n)
             raise ValueError('float dtypes must have encoding data to encode to int.')
-        encoding['dtype'] = data.dtype
-    elif isinstance(encoding['dtype'], str):
-        encoding['dtype'] = np.dtype(encoding['dtype'])
+        encoding['dtype'] = dtype.name
+    # elif isinstance(encoding['dtype'], str):
+    #     encoding['dtype'] = np.dtype(encoding['dtype'])
 
     if 'scale_factor' in encoding:
         if not isinstance(encoding['scale_factor'], (int, float, np.number)):
             raise TypeError('scale_factor must be an int or float.')
 
-        if not np.issubdtype(encoding['dtype'], np.integer):
-            raise TypeError('If scale_factor is assigned, then the dtype must be a np.integer.')
+        if not 'int' in encoding['dtype']:
+            raise TypeError('If scale_factor is assigned, then the dtype must be an integer.')
 
-    if 'int' in encoding['dtype'].name:
+    if 'int' in encoding['dtype']:
         if ('_FillValue' in encoding) and ('missing_value' not in encoding):
             encoding['missing_value'] = encoding['_FillValue']
         if ('_FillValue' not in encoding) and ('missing_value' in encoding):
@@ -302,16 +315,16 @@ def assign_dtype_decoded(encoding):
     if encoding['dtype'] == h5py.string_dtype():
         encoding['dtype_decoded'] = encoding['dtype']
     elif ('calendar' in encoding) and ('units' in encoding):
-        encoding['dtype_decoded'] = np.dtype('datetime64[s]')
+        encoding['dtype_decoded'] = 'datetime64[s]'
 
     if 'scale_factor' in encoding:
 
         # if isinstance(encoding['scale_factor'], (int, np.integer)):
         #     encoding['dtype_decoded'] = np.dtype('float32')
         if encoding['dtype'].itemsize > 2:
-            encoding['dtype_decoded'] = np.dtype('float64')
+            encoding['dtype_decoded'] = 'float64'
         else:
-            encoding['dtype_decoded'] = np.dtype('float32')
+            encoding['dtype_decoded'] = 'float32'
 
     if 'dtype_decoded' not in encoding:
         encoding['dtype_decoded'] = encoding['dtype']
@@ -319,7 +332,7 @@ def assign_dtype_decoded(encoding):
     return encoding
 
 
-def get_encodings(files, group):
+def get_encodings(files, group=None):
     """
     I should add checking across the files for conflicts at some point.
     """
@@ -334,7 +347,12 @@ def get_encodings(files, group):
             ds_list = list(file.keys())
 
         for name in ds_list:
-            enc = get_encoding(file[name])
+            data = file[name]
+            if isinstance(data, xr.DataArray):
+                encoding = get_encoding_data_from_xr(data.encoding)
+            else:
+                encoding = get_encoding_data_from_h5py_attrs(data.attrs)
+            enc = process_encoding(encoding, data.dtype)
             enc = assign_dtype_decoded(enc)
             # file_encs[i].update({name: enc})
 
@@ -343,9 +361,9 @@ def get_encodings(files, group):
             else:
                 encs[name] = enc
 
-        for name, enc in encs.items():
-            enc = assign_dtype_decoded(enc)
-            encs[name] = enc
+        # for name, enc in encs.items():
+        #     enc = assign_dtype_decoded(enc)
+        #     encs[name] = enc
 
         file.close()
 
@@ -363,10 +381,8 @@ def get_attrs(files, group):
         with open_file(file1, group) as file:
             global_attrs.update(dict(file.attrs))
 
-            # file_attrs[i] = {}
             for name in file:
-                attr = {f: v for f, v in file[name].attrs.items() if (f not in enc_fields) and (f not in ['DIMENSION_LABELS', 'DIMENSION_LIST', 'CLASS', 'NAME', '_Netcdf4Coordinates', '_Netcdf4Dimid', 'REFERENCE_LIST'])}
-                # file_attrs[i].update({name: attr})
+                attr = {f: v for f, v in file[name].attrs.items() if (f not in enc_fields) and (f not in ignore_attrs)}
 
                 if name in attrs:
                     attrs[name].update(attr)
@@ -602,7 +618,7 @@ def filter_coords(coords_dict, selection, encodings):
         coords_dict[coord] = new_coord_data
 
 
-def guess_chunk(shape, maxshape, dtype, chunk_max=3*2**20):
+def guess_chunk(shape, maxshape, dtype, chunk_max=2**21):
     """ Guess an appropriate chunk layout for a dataset, given its shape and
     the size of each element in bytes.  Will allocate chunks only as large
     as MAX_SIZE.  Chunks are generally close to some power-of-2 fraction of
@@ -636,7 +652,7 @@ def guess_chunk(shape, maxshape, dtype, chunk_max=3*2**20):
 
         # Determine the optimal chunk size in bytes using a PyTables expression.
         # This is kept as a float.
-        typesize = dtype.itemsize
+        typesize = np.dtype(dtype).itemsize
         # dset_size = np.prod(chunks)*typesize
         # target_size = CHUNK_BASE * (2**np.log10(dset_size/(1024.*1024)))
 
@@ -701,7 +717,7 @@ def guess_chunk_time(shape, maxshape, dtype, time_index, chunk_max=3*2**20):
 
         # Determine the optimal chunk size in bytes using a PyTables expression.
         # This is kept as a float.
-        typesize = dtype.itemsize
+        typesize = np.dtype(dtype).itemsize
 
         target_size = chunk_max
 
@@ -783,16 +799,17 @@ def get_compressor(name: str = None):
     """
 
     """
-    name1 = name.lower()
     if name is None:
         compressor = {}
-    elif name1 == 'gzip':
+    elif name.lower() == 'none':
+        compressor = {}
+    elif name.lower() == 'gzip':
         compressor = {'compression': name}
-    elif name1 == 'lzf':
+    elif name.lower() == 'lzf':
         compressor = {'compression': name}
-    elif name1 == 'zstd':
+    elif name.lower() == 'zstd':
         compressor = hdf5plugin.Zstd(1)
-    elif name1 == 'lz4':
+    elif name.lower() == 'lz4':
         compressor = hdf5plugin.LZ4()
     else:
         raise ValueError('name must be one of gzip, lzf, zstd, lz4, or None.')
