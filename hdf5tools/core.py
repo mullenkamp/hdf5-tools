@@ -15,6 +15,7 @@ import pathlib
 import copy
 import tempfile
 import fcntl
+import uuid
 
 # from hdf5tools import utils
 
@@ -22,12 +23,16 @@ import utils
 
 h5py.get_config().track_order = True
 
+sup = np.testing.suppress_warnings()
+sup.filter(FutureWarning)
+
 ###################################################
 ### Parameters
 
 name = '/media/data01/cache/tethys/test/test1.h5'
 name_indent = 4
 value_indent = 20
+
 
 ###################################################
 ### Classes
@@ -47,6 +52,8 @@ class File:
             A str or pathlib.Path object to a file on disk, a BytesIO object, or None. If None, it will create an in-memory hdf5 File.
         mode : str
             The typical python open mode.
+        compression : str or None
+            The default compression for all dimensiona dna datasets. These can be changed individually at dataset/dimension creation.
         write_lock : bool
             Lock the file (using fcntl.flock) during write operations. Only use this when using multithreading or multiprocessing and you want to write to the same file. You probably shouldn't perform read operations during the writes.
         **kwargs
@@ -57,22 +64,15 @@ class File:
         if 'rdcc_nbytes' not in kwargs:
             kwargs['rdcc_nbytes'] = 2**21
         lock_fileno = None
-        # lock_file_path = None
         if name is None:
-            name = tempfile.NamedTemporaryFile()
+            name = uuid.uuid4().hex[:16]
             kwargs.setdefault('driver', 'core')
             if 'backing_store' not in kwargs:
                 kwargs.setdefault('backing_store', False)
-            file = h5py.File(name=name.name, track_order=True, mode='w', **kwargs)
+            file = h5py.File(name=name, track_order=True, mode='w', **kwargs)
+            writable = True
         else:
             if write_lock and writable:
-                # name = pathlib.Path(name)
-                # lock_file_name = name.name + '.lock'
-                # lock_file_path = name.parent.joinpath(lock_file_name)
-                # lock_file_path.touch()
-                # lock_fileno = os.open(lock_file_path, os.O_RDONLY)
-                # fcntl.flock(lock_fileno, fcntl.LOCK_EX)
-
                 lock_fileno = os.open(name, os.O_RDONLY)
                 fcntl.flock(lock_fileno, fcntl.LOCK_EX)
 
@@ -80,40 +80,18 @@ class File:
             else:
                 file = h5py.File(name=name, mode=mode, track_order=True, **kwargs)
 
-        # if group is not None:
-        #     if group in file:
-        #         grp = file[group]
-        #     else:
-        #         grp = file.create_group(group)
-        # else:
-        #     grp = file['/']
-
-        ## Get encodings
-        encodings = {}
-        for name in file:
-            enc = utils.get_encoding(file[name])
-            enc = utils.assign_dtype_decoded(enc)
-
-            if name in encodings:
-                encodings[name].update(enc)
-            else:
-                encodings[name] = enc
-
         self._file = file
-        # self._grp = grp
         self.mode = mode
         self.writable = writable
         self.filename = file.filename
         self.compression = compression
-        # self.fileno = fileno
         self.lock_fileno = lock_fileno
-        # self.lock_file_path = lock_file_path
-        self.encodings = encodings
+        self.driver = file.driver
 
         for ds_name in file:
             ds = file[ds_name]
             if utils.is_scale(ds):
-                Dimension(ds, self, ds[()])
+                Dimension(ds, self)
             else:
                 Dataset(ds, self)
 
@@ -134,7 +112,7 @@ class File:
         """
 
         """
-        self._file.__bool__()
+        return self._file.__bool__()
 
     def __iter__(self):
         return self._file.__iter__()
@@ -240,7 +218,7 @@ class File:
         return file
 
 
-    def create_dimension(self, name, data, scale_factor=None, add_offset=0, missing_value=None, units=None, calendar=None, dtype_decoded=None, encoding=None, **kwargs):
+    def create_dimension(self, name, data, scale_factor=None, add_offset=None, missing_value=None, units=None, calendar=None, dtype_decoded=None, encoding=None, **kwargs):
         """
 
         """
@@ -257,15 +235,15 @@ class File:
 
         encoding = prepare_encodings_for_datasets(dtype, scale_factor, add_offset, missing_value, units, calendar, dtype_decoded, encoding)
 
-        dimension, data = create_h5py_dimension(self, name, data, encoding, **kwargs)
-        dim = Dimension(dimension, self, data)
+        dimension = create_h5py_dimension(self, name, data, dtype, shape, encoding, **kwargs)
+        dim = Dimension(dimension, self)
         dim.encoding.update(encoding)
         dim.encoding['compression'] = str(compression)
 
         return dim
 
 
-    def create_dataset(self, name, dims, shape=None, dtype=None, data=None, scale_factor=None, add_offset=0, missing_value=None, units=None, calendar=None, dtype_decoded=None, encoding=None, **kwargs):
+    def create_dataset(self, name, dims, shape=None, dtype=None, data=None, scale_factor=None, add_offset=None, missing_value=None, units=None, calendar=None, dtype_decoded=None, encoding=None, **kwargs):
         """
 
         """
@@ -324,7 +302,7 @@ class File:
         # TODO: more elegant way to pass these (dcpl to create_dataset?)
         dcpl = other1.id.get_create_plist()
         kwargs.setdefault('track_times', dcpl.get_obj_track_times())
-        kwargs.setdefault('track_order', dcpl.get_attr_creation_order() > 0)
+        # kwargs.setdefault('track_order', dcpl.get_attr_creation_order() > 0)
 
         # Special case: the maxshape property always exists, but if we pass it
         # to create_dataset, the new dataset will automatically get chunked
@@ -350,57 +328,6 @@ class File:
             ds.attrs.update(other.attrs)
 
         return ds
-
-
-    # def create_dimension_like(self, name, other, include_data=False, **kwargs):
-    #     """ Create a dimension similar to `other`.
-
-    #     name
-    #         Name of the dataset (absolute or relative).  Provide None to make
-    #         an anonymous dataset.
-    #     other
-    #         The dataset which the new dataset should mimic. All properties, such
-    #         as shape, dtype, chunking, ... will be taken from it, but no data
-    #         or attributes are being copied.
-
-    #     Any dataset keywords (see create_dataset) may be provided, including
-    #     shape and dtype, in which case the provided values take precedence over
-    #     those from `other`.
-    #     """
-    #     if not isinstance(other, Dimension):
-    #         raise TypeError('other must be a Dimension.')
-
-    #     other1 = other._dataset
-    #     for k in ('shape', 'dtype', 'chunks', 'compression',
-    #               'compression_opts', 'scaleoffset', 'shuffle', 'fletcher32',
-    #               'fillvalue'):
-    #         kwargs.setdefault(k, getattr(other1, k))
-    #     # TODO: more elegant way to pass these (dcpl to create_dataset?)
-    #     dcpl = other1.id.get_create_plist()
-    #     kwargs.setdefault('track_times', dcpl.get_obj_track_times())
-    #     kwargs.setdefault('track_order', dcpl.get_attr_creation_order() > 0)
-
-    #     # Special case: the maxshape property always exists, but if we pass it
-    #     # to create_dataset, the new dataset will automatically get chunked
-    #     # layout. So we copy it only if it is different from shape.
-    #     if other1.maxshape != other1.shape:
-    #         kwargs.setdefault('maxshape', other1.maxshape)
-
-    #     if include_data:
-    #         ds0 = create_h5py_dimension(self, name, **kwargs)
-
-    #         # Directly copy chunks using write_direct_chunk
-    #         for chunk in ds0.iter_chunks():
-    #             chunk_starts = tuple(c.start for c in chunk)
-    #             _, data = other1.id.read_direct_chunk(chunk_starts)
-    #             ds0.id.write_direct_chunk(chunk_starts, data)
-
-    #     else:
-    #         ds0, data = create_h5py_dimension(self, name, **kwargs)
-
-    #     ds = Dimension(ds0, self, data)
-
-    #     return ds
 
 
 def get_dtype_shape(data=None, dtype=None, shape=None):
@@ -506,7 +433,7 @@ def create_h5py_dimension(file: File, name, data, dtype, shape, encoding, **kwar
     ds.make_scale(name)
     ds.dims[0].label = name
 
-    return ds, data
+    return ds
 
 
 def format_value(value):
@@ -539,31 +466,37 @@ def dataset_summary(ds):
     """
 
     """
-    # dims_shapes = [str(ds.dim_names[i]) + ': ' + str(s) for i, s in enumerate(ds.shape)]
-    dtype_name = ds.dtype.name
+    if ds:
+        # dims_shapes = [str(ds.dim_names[i]) + ': ' + str(s) for i, s in enumerate(ds.shape)]
+        # dtype_name = ds.dtype.name
+        # dtype_decoded = ds.encoding['dtype_decoded']
 
-    summ_dict = {'name': ds.name, 'dtype': dtype_name, 'dims order': '(' + ', '.join(ds.dim_names) + ')', 'chunk size': str(ds.chunks)}
+        # summ_dict = {'name': ds.name, 'dtype encoded': dtype_name, 'dtype decoded': dtype_decoded, 'dims order': '(' + ', '.join(ds.dim_names) + ')', 'chunk size': str(ds.chunks)}
+        summ_dict = {'name': ds.name, 'dims order': '(' + ', '.join(ds.dim_names) + ')', 'chunk size': str(ds.chunks)}
 
-    summary = """<hdf5tools.Dataset>"""
+        summary = """<hdf5tools.Dataset>"""
 
-    summary = append_summary(summary, summ_dict)
+        summary = append_summary(summary, summ_dict)
 
-    summary += """\nDimensions:"""
+        summary += """\nDimensions:"""
 
-    for dim_name in ds.dim_names:
-        dim = ds.file[dim_name]
-        dtype_name = dim.dtype.name
-        dim_len = dim.shape[0]
-        first_value = dim[0]
-        spacing = value_indent - name_indent - len(dim_name)
-        if spacing < 1:
-            spacing = 1
-        dim_str = f"""\n    {dim_name}""" + """ """ * spacing
-        dim_str += f"""({dim_len}) {dtype_name} {first_value} ..."""
-        summary += dim_str
+        for dim_name in ds.dim_names:
+            dim = ds.file[dim_name]
+            dtype_name = dim.encoding['dtype_decoded']
+            dim_len = dim.shape[0]
+            first_value = format_value(dim[0])
+            spacing = value_indent - name_indent - len(dim_name)
+            if spacing < 1:
+                spacing = 1
+            dim_str = f"""\n    {dim_name}""" + """ """ * spacing
+            dim_str += f"""({dim_len}) {dtype_name} {first_value} ..."""
+            summary += dim_str
 
-    attrs_summary = make_attrs_repr(ds.attrs, name_indent, value_indent)
-    summary += """\n""" + attrs_summary
+        attrs_summary = make_attrs_repr(ds.attrs, name_indent, value_indent, 'Attributes')
+        summary += """\n""" + attrs_summary
+
+    else:
+        summary = """Dataset is closed"""
 
     return summary
 
@@ -572,22 +505,26 @@ def dimension_summary(ds):
     """
 
     """
-    name = ds.name
-    dim_len = ds.shape[0]
-    dtype_name = ds.dtype.name
-    # if 'int' in dtype_name:
+    if ds:
+        name = ds.name
+        dim_len = ds.shape[0]
+        # dtype_name = ds.dtype.name
+        # dtype_decoded = ds.encoding['dtype_decoded']
 
-    first_value = ds.data[0]
-    last_value = ds.data[-1]
+        first_value = format_value(ds.data[0])
+        last_value = format_value(ds.data[-1])
 
-    summ_dict = {'name': name, 'dtype': dtype_name, 'chunk size': str(ds.chunks), 'dim length': str(dim_len), 'values': f"""{first_value} ... {last_value}"""}
+        # summ_dict = {'name': name, 'dtype encoded': dtype_name, 'dtype decoded': dtype_decoded, 'chunk size': str(ds.chunks), 'dim length': str(dim_len), 'values': f"""{first_value} ... {last_value}"""}
+        summ_dict = {'name': name, 'chunk size': str(ds.chunks), 'dim length': str(dim_len), 'values': f"""{first_value} ... {last_value}"""}
 
-    summary = """<hdf5tools.Dataset>"""
+        summary = """<hdf5tools.Dataset>"""
 
-    summary = append_summary(summary, summ_dict)
+        summary = append_summary(summary, summ_dict)
 
-    attrs_summary = make_attrs_repr(ds.attrs, name_indent, value_indent)
-    summary += """\n""" + attrs_summary
+        attrs_summary = make_attrs_repr(ds.attrs, name_indent, value_indent, 'Attributes')
+        summary += """\n""" + attrs_summary
+    else:
+        summary = """Dimension is closed"""
 
     return summary
 
@@ -596,50 +533,53 @@ def file_summary(file):
     """
 
     """
-    file_path = pathlib.Path(file.filename)
-    if file_path.exists() and file_path.is_file():
-        file_size = file_path.stat().st_size*0.000001
-        file_size_str = """{file_size:.3f} MB""".format(file_size=file_size)
+    if file:
+        file_path = pathlib.Path(file.filename)
+        if file_path.exists() and file_path.is_file():
+            file_size = file_path.stat().st_size*0.000001
+            file_size_str = """{file_size:.3f} MB""".format(file_size=file_size)
+        else:
+            file_size_str = """NA"""
+
+        summ_dict = {'file name': file_path.name, 'file size': file_size_str, 'writable': str(file.writable)}
+
+        summary = """<hdf5tools.File>"""
+
+        summary = append_summary(summary, summ_dict)
+
+        summary += """\nDimensions:"""
+
+        for dim_name in file.dimensions():
+            dim = file[dim_name]
+            dtype_name = dim.encoding['dtype_decoded']
+            dim_len = dim.shape[0]
+            first_value = format_value(dim[0])
+            spacing = value_indent - name_indent - len(dim_name)
+            if spacing < 1:
+                spacing = 1
+            dim_str = f"""\n    {dim_name}""" + """ """ * spacing
+            dim_str += f"""({dim_len}) {dtype_name} {first_value} ..."""
+            summary += dim_str
+
+        summary += """\nDatasets:"""
+
+        for ds_name in file.datasets():
+            ds = file[ds_name]
+            dtype_name = ds.encoding['dtype_decoded']
+            shape = ds.shape
+            dim_names = ', '.join(ds.dim_names)
+            first_value = format_value(ds[tuple(0 for i in range(len(shape)))])
+            spacing = value_indent - name_indent - len(ds_name)
+            if spacing < 1:
+                spacing = 1
+            ds_str = f"""\n    {ds_name}""" + """ """ * spacing
+            ds_str += f"""({dim_names}) {dtype_name} {first_value} ..."""
+            summary += ds_str
+
+        attrs_summary = make_attrs_repr(file.attrs, name_indent, value_indent, 'Attributes')
+        summary += """\n""" + attrs_summary
     else:
-        file_size_str = """NA"""
-
-    summ_dict = {'file name': file_path.name, 'file size': file_size_str, 'writable': str(file.writable)}
-
-    summary = """<hdf5tools.File>"""
-
-    summary = append_summary(summary, summ_dict)
-
-    summary += """\nDimensions:"""
-
-    for dim_name in file.dimensions():
-        dim = file[dim_name]
-        dtype_name = dim.dtype.name
-        dim_len = dim.shape[0]
-        first_value = dim[0]
-        spacing = value_indent - name_indent - len(dim_name)
-        if spacing < 1:
-            spacing = 1
-        dim_str = f"""\n    {dim_name}""" + """ """ * spacing
-        dim_str += f"""({dim_len}) {dtype_name} {first_value} ..."""
-        summary += dim_str
-
-    summary += """\nDatasets:"""
-
-    for ds_name in file.datasets():
-        ds = file[ds_name]
-        dtype_name = ds.dtype.name
-        shape = ds.shape
-        dim_names = ', '.join(ds.dim_names)
-        first_value = ds[tuple(0 for i in range(len(shape)))]
-        spacing = value_indent - name_indent - len(ds_name)
-        if spacing < 1:
-            spacing = 1
-        ds_str = f"""\n    {ds_name}""" + """ """ * spacing
-        ds_str += f"""({dim_names}) {dtype_name} {first_value} ..."""
-        summary += ds_str
-
-    attrs_summary = make_attrs_repr(file.attrs, name_indent, value_indent)
-    summary += """\n""" + attrs_summary
+        summary = """File is closed"""
 
     return summary
 
@@ -657,14 +597,17 @@ class Dataset:
         self.dim_names = tuple(dim.label for dim in dataset.dims)
         self.ndim = dataset.ndim
         self.shape = dataset.shape
+        self.size = dataset.size
         self.dtype = dataset.dtype
+        self.nbytes = dataset.nbytes
         self.chunks = dataset.chunks
+        self.fillvalue = dataset.fillvalue
         self.name = dataset.name.split('/')[-1]
         self.file = file
         setattr(file, self.name, self)
-        self.loc = LocationIndexer(self)
         self.attrs = Attributes(dataset.attrs)
-        self.encoding = Encoding(dataset.attrs, dataset.dtype)
+        self.encoding = Encoding(dataset.attrs, dataset.dtype, file.writable)
+        self.loc = LocationIndexer(self)
 
 
     def __getitem__(self, key):
@@ -674,6 +617,11 @@ class Dataset:
     def iter_chunks(self, sel=None):
         return self._dataset.iter_chunks(sel)
 
+    def __bool__(self):
+        return self._dataset.__bool__()
+
+    def len(self):
+        return self._dataset.len()
 
     def to_pandas(self):
         """
@@ -685,11 +633,11 @@ class Dataset:
 
         """
 
-    def copy(self, name, include_data=True, **kwargs):
+    def copy(self, name, include_data=True, include_attrs=True, **kwargs):
         """
         Copy a Dataset object. Same as create_dataset_like.
         """
-        ds = self.file.create_dataset_like(name, self, include_data=True, **kwargs)
+        ds = self.file.create_dataset_like(name, self, include_data=include_data, include_attrs=include_attrs, **kwargs)
 
         return ds
 
@@ -711,7 +659,7 @@ class Dimension:
     """
 
     """
-    def __init__(self, dataset: h5py.Dataset, file: File, data: np.ndarray):
+    def __init__(self, dataset: h5py.Dataset, file: File):
         """
 
         """
@@ -719,23 +667,25 @@ class Dimension:
         self.dim_names = tuple(dim.label for dim in dataset.dims)
         self.ndim = dataset.ndim
         self.shape = dataset.shape
+        self.size = dataset.size
         self.dtype = dataset.dtype
+        self.nbytes = dataset.nbytes
         self.chunks = dataset.chunks
+        self.fillvalue = dataset.fillvalue
         self.name = dataset.name.split('/')[-1]
         self.file = file
-        self.data = data
         setattr(file, self.name, self)
-        self.loc = LocationIndexer(self)
         self.attrs = Attributes(dataset.attrs)
-        self.encoding = Encoding(dataset.attrs, dataset.dtype)
+        self.encoding = Encoding(dataset.attrs, dataset.dtype, file.writable)
+        self.loc = LocationIndexer(self)
+        self.data = self[()]
 
 
-
-    def copy(self, name, include_data=True, **kwargs):
+    def copy(self, name, include_data=True, include_attrs=True, **kwargs):
         """
         Copy a Dataset object. Same as create_dimension_like.
         """
-        ds = self.file.create_dimension_like(name, self, include_data=True, **kwargs)
+        ds = self.file.create_dimension_like(name, self, include_data=include_data, include_attrs=include_attrs, **kwargs)
 
         return ds
 
@@ -744,6 +694,12 @@ class Dimension:
 
     def iter_chunks(self, sel=None):
         return self._dataset.iter_chunks(sel)
+
+    def __bool__(self):
+        return self._dataset.__bool__()
+
+    def len(self):
+        return self._dataset.len()
 
     def __repr__(self):
         """
@@ -830,13 +786,15 @@ class Encoding:
     """
 
     """
-    def __init__(self, attrs: h5py.AttributeManager, dtype):
+    def __init__(self, attrs: h5py.AttributeManager, dtype, writable):
         enc = utils.get_encoding_data_from_h5py_attrs(attrs)
         enc = utils.process_encoding(enc, dtype)
         enc = utils.assign_dtype_decoded(enc)
         self._encoding = enc
-        attrs.update(enc)
+        if writable:
+            attrs.update(enc)
         self._attrs = attrs
+        self._writable = writable
 
     def get(self, key, default=None):
         return self._encoding.get(key, default)
@@ -847,15 +805,17 @@ class Encoding:
     def __setitem__(self, key, value):
         if key in utils.enc_fields:
             self._encoding[key] = value
-            self._attrs[key] = value
+            if self._writable:
+                self._attrs[key] = value
         else:
             raise ValueError(f'key must be one of {utils.enc_fields}.')
 
     def clear(self):
         keys = list(self._encoding.keys())
         self._encoding.clear()
-        for key in keys:
-            del self._attrs[key]
+        if self._writable:
+            for key in keys:
+                del self._attrs[key]
 
     def keys(self):
         return self._encoding.keys()
@@ -867,8 +827,9 @@ class Encoding:
         return self._encoding.items()
 
     def pop(self, key, default=None):
-        if key in self._attrs:
-            del self._attrs[key]
+        if self._writable:
+            if key in self._attrs:
+                del self._attrs[key]
         return self._encoding.pop(key, default)
 
     def update(self, other=()):
@@ -876,11 +837,13 @@ class Encoding:
         for key, value in key_values.items():
             if key in utils.enc_fields:
                 self._encoding[key] = value
-                self._attrs[key] = value
+                if self._writable:
+                    self._attrs[key] = value
 
     def __delitem__(self, key):
         del self._encoding[key]
-        del self._attrs[key]
+        if self._writable:
+            del self._attrs[key]
 
     def __contains__(self, key):
         return key in self._encoding
@@ -938,21 +901,29 @@ class LocationIndexer:
         """
 
         """
-        if isinstance(key, slice):
-            dim = self.dataset.file[self.dataset.dim_names[0]]
-            slice_idx = index_slice(key, dim.data)
+        if isinstance(key, (int, float, str, slice, list, np.ndarray)):
+            index = index_all(key, self.dataset, 0)
 
-            return self.dataset[slice_idx]
+            return self.dataset[index]
 
         elif isinstance(key, tuple):
-            if len(key) > self.dataset.ndim:
+            key_len = len(key)
+
+            if key_len == 0:
+                return self.dataset[()]
+
+            elif key_len > self.dataset.ndim:
                 raise ValueError('input must have <= ndims.')
-            types = tuple(type(k) for k in key)
+
+            index = []
+            for i, k in enumerate(key):
+                index_i = index_all(k, self.dataset, i)
+                index.append(index_i)
+
+            return self.dataset[tuple(index)]
 
         else:
-            # Do your handling for a plain index
-            print("plain", key)
-
+            raise ValueError('You passed a strange object to index...')
 
 
 def index_slice(slice_obj, dim_data):
@@ -963,35 +934,111 @@ def index_slice(slice_obj, dim_data):
     stop = slice_obj.stop
 
     ## If the np.nonzero finds nothing, then it fails
-    try:
-        start_idx = np.nonzero(dim_data == start)[0][0]
-    except IndexError:
-        raise ValueError(f'{start} not in dimension.')
+    if start is None:
+        start_idx = None
+    else:
+        try:
+            start_idx = np.nonzero(dim_data == start)[0][0]
+        except IndexError:
+            try:
+                start_time = np.datetime64(start)
+                start_idx = np.nonzero(dim_data == start_time)[0][0]
+            except IndexError:
+                raise ValueError(f'{start} not in dimension.')
 
-    try:
-        stop_idx = np.nonzero(dim_data == stop)[0][0]
-    except IndexError:
-        raise ValueError(f'{stop} not in dimension.')
+    ## stop_idx should include the stop label as per pandas
+    if stop is None:
+        stop_idx = None
+    else:
+        try:
+            stop_idx = np.nonzero(dim_data == stop)[0][0] + 1
+        except IndexError:
+            try:
+                stop_time = np.datetime64(stop)
+                stop_idx = np.nonzero(dim_data == stop_time)[0][0] + 1
+            except IndexError:
+                raise ValueError(f'{stop} not in dimension.')
 
-    if start_idx > stop_idx:
-        raise ValueError(f'start index at {start_idx} is after stop index at {stop_idx}.')
-
-    # start_stop_idx = np.searchsorted(dim_data, [start, stop])
-
-    # if start > dim_data[-1]:
-    #     raise ValueError('start is greater than max dim data.')
-    # if stop < dim_data[0]:
-    #     raise ValueError('stop is less than min dim data.')
-
-    # start_idx = np.searchsorted(dim_data, start)
-    # stop_idx = (np.abs(dim_data - stop)).argmin()
+    if (stop_idx is not None) and (start_idx is not None):
+        if start_idx > stop_idx:
+            raise ValueError(f'start index at {start_idx} is after stop index at {stop_idx}.')
 
     return slice(start_idx, stop_idx)
 
 
+def index_label(label, dim_data):
+    """
+
+    """
+    try:
+        label_idx = np.nonzero(dim_data == label)[0][0]
+    except IndexError:
+        try:
+            label_time = np.datetime64(label)
+            label_idx = np.nonzero(dim_data == label_time)[0][0]
+        except IndexError:
+            raise ValueError(f'{label} not in dimension.')
+
+    return label_idx
 
 
+def index_array(values, dim_data):
+    """
 
+    """
+    values = np.asarray(values)
+
+    val_len = len(values)
+    if val_len == 0:
+        raise ValueError('The array is empty...')
+    elif val_len == 1:
+        index = index_label(values[0], dim_data)
+
+    ## check if regular
+    elif utils.is_regular_index(values):
+        index = index_slice(slice(values[0], values[-1]), dim_data)
+
+    # TODO I might need to do something more fancy here...
+    else:
+        index = values
+
+    return index
+
+
+@sup
+def index_all(key, dataset, pos):
+    """
+
+    """
+    if isinstance(key, (int, float, str)):
+        dim_data = dataset.file[dataset.dim_names[pos]].data
+        label_idx = index_label(key, dim_data)
+
+        return label_idx
+
+    elif isinstance(key, slice):
+        dim_data = dataset.file[dataset.dim_names[pos]].data
+        slice_idx = index_slice(key, dim_data)
+
+        return slice_idx
+
+    elif key is None:
+         return slice(None, None)
+
+    elif isinstance(key, (list, np.ndarray)):
+        key = np.asarray(key)
+
+        dim_data = dataset.file[dataset.dim_names[pos]].data
+
+        if key.dtype.name == 'bool':
+            if len(key) != len(dim_data):
+                raise ValueError('If the input is a bool array, then it must be the same length as the dimension.')
+
+            return key
+        else:
+            idx = index_array(key, dim_data)
+
+            return idx
 
 
 

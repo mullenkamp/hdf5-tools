@@ -220,7 +220,11 @@ def decode_data(data, dtype_decoded, missing_value=None, add_offset=0, scale_fac
         data = data.astype(dtype_decoded)
 
         if isinstance(missing_value, (int, np.number)):
-            data[data == missing_value] = np.nan
+            if isinstance(data, np.number):
+                if data == missing_value:
+                    data = np.nan
+            else:
+                data[data == missing_value] = np.nan
 
         data = (data * scale_factor) + add_offset
 
@@ -285,15 +289,19 @@ def process_encoding(encoding, dtype):
             # scale, offset = compute_scale_and_offset(min_value, max_value, n)
             raise ValueError('float dtypes must have encoding data to encode to int.')
         encoding['dtype'] = dtype.name
-    # elif isinstance(encoding['dtype'], str):
-    #     encoding['dtype'] = np.dtype(encoding['dtype'])
+    elif not isinstance(encoding['dtype'], str):
+        encoding['dtype'] = encoding['dtype'].name
 
     if 'scale_factor' in encoding:
         if not isinstance(encoding['scale_factor'], (int, float, np.number)):
             raise TypeError('scale_factor must be an int or float.')
 
         if not 'int' in encoding['dtype']:
-            raise TypeError('If scale_factor is assigned, then the dtype must be an integer.')
+            raise ValueError('If scale_factor is assigned, then the dtype must be an integer.')
+        if 'add_offset' not in encoding:
+            encoding['add_offset'] = 0
+        elif not isinstance(encoding['add_offset'], (int, float, np.number)):
+            raise ValueError('add_offset must be a number.')
 
     if 'int' in encoding['dtype']:
         if ('_FillValue' in encoding) and ('missing_value' not in encoding):
@@ -312,7 +320,7 @@ def assign_dtype_decoded(encoding):
     """
 
     """
-    if encoding['dtype'] == h5py.string_dtype():
+    if encoding['dtype'] == 'object':
         encoding['dtype_decoded'] = encoding['dtype']
     elif ('calendar' in encoding) and ('units' in encoding):
         encoding['dtype_decoded'] = 'datetime64[s]'
@@ -321,7 +329,7 @@ def assign_dtype_decoded(encoding):
 
         # if isinstance(encoding['scale_factor'], (int, np.integer)):
         #     encoding['dtype_decoded'] = np.dtype('float32')
-        if encoding['dtype'].itemsize > 2:
+        if np.dtype(encoding['dtype']).itemsize > 2:
             encoding['dtype_decoded'] = 'float64'
         else:
             encoding['dtype_decoded'] = 'float32'
