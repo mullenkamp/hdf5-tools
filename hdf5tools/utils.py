@@ -32,7 +32,9 @@ time_str_conversion = {'days': 'datetime64[D]',
                        'hours': 'datetime64[h]',
                        'minutes': 'datetime64[m]',
                        'seconds': 'datetime64[s]',
-                       'milliseconds': 'datetime64[ms]'}
+                       'milliseconds': 'datetime64[ms]',
+                       'microseconds': 'datetime64[us]',
+                       'nanoseconds': 'datetime64[ns]'}
 
 enc_fields = ('units', 'calendar', 'dtype', 'missing_value', '_FillValue', 'add_offset', 'scale_factor', 'dtype_decoded', 'compression')
 
@@ -123,9 +125,29 @@ class ChunkIterator:
 ### Functions
 
 
-def compute_scale_and_offset(min_value, max_value, dtype):
+def compute_scale_and_offset(min_value: (int, float, np.number), max_value: (int, float, np.number), dtype: np.dtype):
     """
-    Computes the scale_factor and offset for the dataset using a min value and max value, and int n
+    Computes the scale (slope) and offset for a dataset using a min value, max value, and the required np.dtype. It leaves one value at the lower extreme to use for the nan fillvalue.
+    These are the min values set asside for the fillvalue (up to 64 bits).
+    int8:  -128
+    int16: -32768
+    int32: -2147483648
+    int64: -9223372036854775808
+
+    Unsigned integers are allowed and a value of 0 is set asside for the fillvalue.
+
+    Parameters
+    ----------
+    min_value : int or float
+        The min value of the dataset.
+    max_value : int or float
+        The max value of the dataset.
+    dtype : np.dtype
+        The data type that you want to shrink the data down to.
+
+    Returns
+    -------
+    scale, offset as floats
     """
     bits = dtype.itemsize * 8
     data_range = max_value - min_value
@@ -139,6 +161,10 @@ def compute_scale_and_offset(min_value, max_value, dtype):
         target_power = int(math.log10(target_range))
         target_min = -10**(target_power - 1)
         slope = 10**-(target_power - data_power)
+
+    # Correction if the dtype is unsigned
+    if dtype.kind == 'u':
+        target_min = 1
 
     offset = min_value - (slope*target_min)
 

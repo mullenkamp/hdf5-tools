@@ -902,7 +902,7 @@ class LocationIndexer:
 
         """
         if isinstance(key, (int, float, str, slice, list, np.ndarray)):
-            index = index_all(key, self.dataset, 0)
+            index = index_combo_one(key, self.dataset, 0)
 
             return self.dataset[index]
 
@@ -917,13 +917,44 @@ class LocationIndexer:
 
             index = []
             for i, k in enumerate(key):
-                index_i = index_all(k, self.dataset, i)
+                index_i = index_combo_one(k, self.dataset, i)
                 index.append(index_i)
 
             return self.dataset[tuple(index)]
 
         else:
             raise ValueError('You passed a strange object to index...')
+
+
+    def __setitem__(self, key, value):
+        """
+
+        """
+        if isinstance(key, (int, float, str, slice, list, np.ndarray)):
+            index = index_combo_one(key, self.dataset, 0)
+
+            self.dataset[index] = value
+
+        elif isinstance(key, tuple):
+            key_len = len(key)
+
+            if key_len == 0:
+                self.dataset[()] = value
+
+            elif key_len > self.dataset.ndim:
+                raise ValueError('input must have <= ndims.')
+
+            index = []
+            for i, k in enumerate(key):
+                index_i = index_combo_one(k, self.dataset, i)
+                index.append(index_i)
+
+            self.dataset[tuple(index)] = value
+
+        else:
+            raise ValueError('You passed a strange object to index...')
+
+
 
 
 def index_slice(slice_obj, dim_data):
@@ -1006,7 +1037,7 @@ def index_array(values, dim_data):
 
 
 @sup
-def index_all(key, dataset, pos):
+def index_combo_one(key, dataset, pos):
     """
 
     """
@@ -1039,7 +1070,6 @@ def index_all(key, dataset, pos):
             idx = index_array(key, dim_data)
 
             return idx
-
 
 
 
