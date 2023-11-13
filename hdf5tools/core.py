@@ -29,7 +29,6 @@ sup.filter(FutureWarning)
 ###################################################
 ### Parameters
 
-name = '/media/data01/cache/tethys/test/test1.h5'
 name_indent = 4
 value_indent = 20
 
@@ -124,10 +123,13 @@ class File:
         return key in self._file
 
     def __getitem__(self, key):
-        if key in self._file:
-            return getattr(self, key)
+        if isinstance(key, str):
+            if key in self._file:
+                return getattr(self, key)
+            else:
+                raise KeyError(key)
         else:
-            raise KeyError(key)
+            raise TypeError('key must be a string.')
 
     def __setitem__(self, key, value):
         if isinstance(value, (Dataset, Dimension)):
@@ -178,10 +180,110 @@ class File:
         """
         return file_summary(self)
 
-    def sel(self):
+    def sel(self, selection: dict=None, include_dims: list=None, exclude_dims: list=None, include_datasets: list=None, exclude_datasets: list=None, **file_kwargs):
         """
 
         """
+        ## Check for dimension names in input
+        dims = np.array(list(self.dimensions()))
+
+        if selection is not None:
+            keys = tuple(selection.keys())
+            for key in keys:
+                if key not in dims:
+                    raise KeyError(f'{key} is not in the dimensions.')
+
+        if include_dims is not None:
+            include_dims_check = np.isin(include_dims, dims)
+            if not include_dims_check.all():
+                no_dims = ', '.join(include_dims[np.where(include_dims_check)[0].tolist()])
+                raise KeyError(f'{no_dims} are not in dims.')
+
+        if exclude_dims is not None:
+            exclude_dims_check = np.isin(exclude_dims, dims)
+            if not exclude_dims_check.all():
+                no_dims = ', '.join(exclude_dims[np.where(exclude_dims_check)[0].tolist()])
+                raise KeyError(f'{no_dims} are not in dims.')
+
+        ## Check if datasets exist
+        datasets = np.array(list(self.datasets()))
+
+        if include_datasets is not None:
+            include_datasets_check = np.isin(include_datasets, datasets)
+            if not include_datasets_check.all():
+                no_datasets = ', '.join(include_datasets[np.where(include_datasets_check)[0].tolist()])
+                raise KeyError(f'{no_datasets} are not in datasets.')
+
+        if exclude_datasets is not None:
+            exclude_datasets_check = np.isin(exclude_datasets, datasets)
+            if not exclude_datasets_check.all():
+                no_datasets = ', '.join(exclude_datasets[np.where(exclude_datasets_check)[0].tolist()])
+                raise KeyError(f'{no_datasets} are not in datasets.')
+
+        ## Filter dims
+        if include_dims is not None:
+            dims = dims[np.isin(dims, include_dims)]
+        if exclude_dims is not None:
+            dims = dims[~np.isin(dims, exclude_dims)]
+
+        ## Filter datasets
+        if include_datasets is not None:
+            datasets = datasets[np.isin(datasets, include_datasets)]
+        if exclude_datasets is not None:
+            datasets = datasets[~np.isin(datasets, exclude_datasets)]
+
+        for ds_name in copy.deepcopy(datasets):
+            ds = self[ds_name]
+            ds_dims = np.array(ds.dim_names)
+            dims_check = np.isin(ds_dims, dims).all()
+            if not dims_check:
+                datasets.remove(ds_name)
+
+        ## Create file
+        file_kwargs['mode'] = 'w'
+        new_file = File(**file_kwargs)
+
+        ## Iterate through the dimensions
+        for dim_name in dims:
+            old_dim = self[dim_name]
+
+            if selection is not None:
+                if dim_name in selection:
+                    data = old_dim.loc[selection[dim_name]]
+                else:
+                    data = old_dim.data
+            else:
+                data = old_dim.data
+
+            new_dim = new_file.create_dimension(dim_name, data, encoding=old_dim.encoding._encoding)
+            new_dim.attrs.update(old_dim.attrs)
+
+        ## Iterate through the old datasets
+        # TODO: Make the dataset copy when doing a selection more RAM efficient
+        for ds_name in datasets:
+            old_ds = self[ds_name]
+
+            if selection is not None:
+                ds_dims = old_ds.dim_names
+
+                ds_sel = []
+                for dim in ds_dims:
+                    if dim in keys:
+                        ds_sel.append(selection[key])
+                    else:
+                        ds_sel.append(None)
+
+                data = old_ds.loc[tuple(ds_sel)]
+                new_ds = new_file.create_dataset(ds_name, old_ds.dim_names, data=data, encoding=old_ds.encoding._encoding)
+                new_ds.attrs.update(old_ds.attrs)
+            else:
+                new_ds = old_ds.copy(new_file)
+
+        ## Add global attrs
+        new_file.attrs.update(self.attrs)
+
+        return new_file
+
 
     def to_pandas(self):
         """
@@ -198,22 +300,22 @@ class File:
 
         """
 
-    def copy(self, name: Union[str, pathlib.Path, io.BytesIO]=None, compression: str='zstd', **kwargs):
+    def copy(self, name: Union[str, pathlib.Path, io.BytesIO]=None, compression: str='zstd', **file_kwargs):
         """
         Copy a file object. kwargs can be any parameter for File.
         """
         # kwargs.setdefault('mode', 'w')
-        file = File(name, mode='w', compression=compression, **kwargs)
+        file = File(name, mode='w', compression=compression, **file_kwargs)
 
         ## Create dimensions
         for dim_name in self.dimensions():
             dim = self[dim_name]
-            _ = file.create_dimension_like(dim.name, dim, include_data=True)
+            _ = copy_dimension(file, dim, dim_name)
 
         ## Create datasets
         for ds_name in self.datasets():
             ds = self[ds_name]
-            _ = file.create_dataset_like(ds.name, ds, include_data=True)
+            _ = copy_dataset(file, ds, ds_name)
 
         return file
 
@@ -235,9 +337,8 @@ class File:
 
         encoding = prepare_encodings_for_datasets(dtype, scale_factor, add_offset, missing_value, units, calendar, dtype_decoded, encoding)
 
-        dimension = create_h5py_dimension(self, name, data, dtype, shape, encoding, **kwargs)
-        dim = Dimension(dimension, self)
-        dim.encoding.update(encoding)
+        dimension = create_h5py_dimension(self, name, data, shape, encoding, **kwargs)
+        dim = Dimension(dimension, self, encoding)
         dim.encoding['compression'] = str(compression)
 
         return dim
@@ -261,21 +362,20 @@ class File:
 
         encoding = prepare_encodings_for_datasets(dtype, scale_factor, add_offset, missing_value, units, calendar, dtype_decoded, encoding)
 
-        ds0 = create_h5py_dataset(self, name, dims, shape, dtype, data, encoding, **kwargs)
-        ds = Dataset(ds0, self)
-        ds.encoding.update(encoding)
+        ds0 = create_h5py_dataset(self, name, dims, shape, encoding, data, **kwargs)
+        ds = Dataset(ds0, self, encoding)
         ds.encoding['compression'] = str(compression)
 
         return ds
 
 
-    def create_dataset_like(self, name, other, include_data=False, include_attrs=False, **kwargs):
+    def create_dataset_like(self, from_dataset, name, include_data=False, include_attrs=False, **kwargs):
         """ Create a dataset similar to `other`.
 
         name
             Name of the dataset (absolute or relative).  Provide None to make
             an anonymous dataset.
-        other
+        from_dataset
             The dataset which the new dataset should mimic. All properties, such
             as shape, dtype, chunking, ... will be taken from it, but no data
             or attributes are being copied.
@@ -284,48 +384,7 @@ class File:
         shape and dtype, in which case the provided values take precedence over
         those from `other`.
         """
-        if not isinstance(other, Dataset):
-            raise TypeError('other must be a Dataset.')
-
-        other1 = other._dataset
-        for k in ('shape', 'dtype', 'chunks', 'compression',
-                  'compression_opts', 'scaleoffset', 'shuffle', 'fletcher32',
-                  'fillvalue'):
-            kwargs.setdefault(k, getattr(other1, k))
-
-        if 'compression' in other1.attrs:
-            compression = other1.attrs['compression']
-            kwargs.update(**utils.get_compressor(compression))
-        else:
-            compression = kwargs['compression']
-
-        # TODO: more elegant way to pass these (dcpl to create_dataset?)
-        dcpl = other1.id.get_create_plist()
-        kwargs.setdefault('track_times', dcpl.get_obj_track_times())
-        # kwargs.setdefault('track_order', dcpl.get_attr_creation_order() > 0)
-
-        # Special case: the maxshape property always exists, but if we pass it
-        # to create_dataset, the new dataset will automatically get chunked
-        # layout. So we copy it only if it is different from shape.
-        if other1.maxshape != other1.shape:
-            kwargs.setdefault('maxshape', other1.maxshape)
-
-        if include_data:
-            ds0 = create_h5py_dataset(self, name, tuple(dim.label for dim in other1.dims),  **kwargs)
-
-            # Directly copy chunks using write_direct_chunk
-            for chunk in ds0.iter_chunks():
-                chunk_starts = tuple(c.start for c in chunk)
-                filter_mask, data = other1.id.read_direct_chunk(chunk_starts)
-                ds0.id.write_direct_chunk(chunk_starts, data, filter_mask)
-
-        else:
-            ds0 = create_h5py_dataset(self, name, tuple(dim.label for dim in other1.dims), **kwargs)
-
-        ds = Dataset(ds0, self)
-        ds.encoding.update(other.encoding._encoding)
-        if include_attrs:
-            ds.attrs.update(other.attrs)
+        ds = copy_dataset(self, from_dataset, name, include_data, include_attrs, **kwargs)
 
         return ds
 
@@ -360,26 +419,26 @@ def prepare_encodings_for_datasets(dtype, scale_factor, add_offset, missing_valu
             if key not in utils.enc_fields:
                 raise ValueError(f'{key} is not a valid encoding parameter. They must be one or more of {utils.enc_fields}.')
 
+    if 'datetime64' in dtype:
+        if 'units' not in encoding:
+            encoding['units'] = 'seconds since 1970-01-01'
+        if 'calendar' not in encoding:
+            encoding['calendar'] = 'gregorian'
+        encoding['dtype'] = 'int64'
+
     return encoding
 
 
-def create_h5py_dataset(file: File, name, dims, shape=None, dtype=None, data=None,  encoding=None, **kwargs):
+def create_h5py_dataset(file: File, name, dims, shape, encoding, data=None, **kwargs):
     """
 
     """
-    if data is None:
-        if (shape is None) or (dtype is None):
-            raise ValueError('shape and dtype must be passed or data must be passed.')
-        if not isinstance(dtype, str):
-            dtype = dtype.name
-    else:
-        shape = data.shape
-        dtype = data.dtype.name
+    dtype = encoding['dtype']
 
     ## Check if dims already exist and if the dim lengths match
     for i, dim in enumerate(dims):
         if dim not in file:
-            raise ValueError(f'{dim} not in File-Group')
+            raise ValueError(f'{dim} not in File')
 
         dim_len = file._file[dim].shape[0]
         if dim_len != shape[i]:
@@ -409,12 +468,14 @@ def create_h5py_dataset(file: File, name, dims, shape=None, dtype=None, data=Non
     return ds
 
 
-def create_h5py_dimension(file: File, name, data, dtype, shape, encoding, **kwargs):
+def create_h5py_dimension(file: File, name, data, shape, encoding, **kwargs):
     """
 
     """
     if len(shape) != 1:
         raise ValueError('The shape of a dimension must be 1-D.')
+
+    dtype = encoding['dtype']
 
     ## Make chunks
     if 'chunks' not in kwargs:
@@ -425,7 +486,11 @@ def create_h5py_dimension(file: File, name, data, dtype, shape, encoding, **kwar
         kwargs.setdefault('chunks', utils.guess_chunk(shape, maxshape, dtype))
 
     ## Encode data before creating dataset/dimension
+    # print(encoding)
     data = utils.encode_data(data, **encoding)
+
+    # print(data)
+    # print(dtype)
 
     ## Make Dataset
     ds = file._file.create_dataset(name, dtype=dtype, data=data, track_order=True, **kwargs)
@@ -589,7 +654,7 @@ class Dataset:
     """
 
     """
-    def __init__(self, dataset: h5py.Dataset, file: File):
+    def __init__(self, dataset: h5py.Dataset, file: File, encoding: dict=None):
         """
 
         """
@@ -606,13 +671,15 @@ class Dataset:
         self.file = file
         setattr(file, self.name, self)
         self.attrs = Attributes(dataset.attrs)
-        self.encoding = Encoding(dataset.attrs, dataset.dtype, file.writable)
+        self.encoding = Encoding(dataset.attrs, dataset.dtype, file.writable, encoding)
         self.loc = LocationIndexer(self)
 
 
     def __getitem__(self, key):
-        return utils.decode_data(self._dataset[key], **self.encoding._encoding)
+        return self.encoding.decode(self._dataset[key])
 
+    def __setitem__(self, key, value):
+        self._dataset[key] = self.encoding.encode(value)
 
     def iter_chunks(self, sel=None):
         return self._dataset.iter_chunks(sel)
@@ -633,11 +700,20 @@ class Dataset:
 
         """
 
-    def copy(self, name, include_data=True, include_attrs=True, **kwargs):
+    def copy(self, to_file: File=None, name: str=None, include_data=True, include_attrs=True, **kwargs):
         """
         Copy a Dataset object. Same as create_dataset_like.
         """
-        ds = self.file.create_dataset_like(name, self, include_data=include_data, include_attrs=include_attrs, **kwargs)
+        if (to_file is None) and (name is None):
+            raise ValueError('If to_file is None, then a name must be passed.')
+
+        if to_file is None:
+            to_file = self.file
+
+        if name is None:
+            name = self.name
+
+        ds = copy_dataset(to_file, self, name, include_data=include_data, include_attrs=include_attrs, **kwargs)
 
         return ds
 
@@ -659,7 +735,7 @@ class Dimension:
     """
 
     """
-    def __init__(self, dataset: h5py.Dataset, file: File):
+    def __init__(self, dataset: h5py.Dataset, file: File, encoding: dict=None):
         """
 
         """
@@ -676,21 +752,37 @@ class Dimension:
         self.file = file
         setattr(file, self.name, self)
         self.attrs = Attributes(dataset.attrs)
-        self.encoding = Encoding(dataset.attrs, dataset.dtype, file.writable)
+        self.encoding = Encoding(dataset.attrs, dataset.dtype, file.writable, encoding)
         self.loc = LocationIndexer(self)
         self.data = self[()]
 
 
-    def copy(self, name, include_data=True, include_attrs=True, **kwargs):
+    def copy(self, to_file: File=None, name: str=None, include_attrs=True, **kwargs):
         """
-        Copy a Dataset object. Same as create_dimension_like.
+        Copy a Dimension object.
         """
-        ds = self.file.create_dimension_like(name, self, include_data=include_data, include_attrs=include_attrs, **kwargs)
+        if (to_file is None) and (name is None):
+            raise ValueError('If to_file is None, then a name must be passed.')
+
+        if to_file is None:
+            to_file = self.file
+
+        if name is None:
+            name = self.name
+
+        ds = copy_dimension(to_file, self, name, include_attrs=include_attrs, **kwargs)
 
         return ds
 
     def __getitem__(self, key):
-        return utils.decode_data(self._dataset[key], **self.encoding._encoding)
+        return self.encoding.decode(self._dataset[key])
+
+    def __setitem__(self, key, value):
+        """
+
+        """
+        self._dataset[key] = self.encoding.encode(value)
+        self.data = self[()]
 
     def iter_chunks(self, sel=None):
         return self._dataset.iter_chunks(sel)
@@ -786,8 +878,11 @@ class Encoding:
     """
 
     """
-    def __init__(self, attrs: h5py.AttributeManager, dtype, writable):
-        enc = utils.get_encoding_data_from_h5py_attrs(attrs)
+    def __init__(self, attrs: h5py.AttributeManager, dtype, writable, encoding: dict=None):
+        if encoding is None:
+            enc = utils.get_encoding_data_from_attrs(attrs)
+        else:
+            enc = utils.get_encoding_data_from_attrs(encoding)
         enc = utils.process_encoding(enc, dtype)
         enc = utils.assign_dtype_decoded(enc)
         self._encoding = enc
@@ -854,22 +949,28 @@ class Encoding:
     def __repr__(self):
         return make_attrs_repr(self, name_indent, value_indent, 'Encodings')
 
-
-class EncodeDecode:
-    """
-
-    """
-    def __init__(self, encoding):
-        """
-
-        """
-        self.encoding
-
     def encode(self, values):
-        return utils.encode_data(values, **self.encoding._encoding)
+        return utils.encode_data(values, **self._encoding)
 
     def decode(self, values):
-        return utils.decode_data(values, **self.encoding._encoding)
+        return utils.decode_data(values, **self._encoding)
+
+
+# class EncodeDecode:
+#     """
+
+#     """
+#     def __init__(self, encoding):
+#         """
+
+#         """
+#         self.encoding
+
+#     def encode(self, values):
+#         return utils.encode_data(values, **self.encoding._encoding)
+
+#     def decode(self, values):
+#         return utils.decode_data(values, **self.encoding._encoding)
 
 
 
@@ -904,13 +1005,13 @@ class LocationIndexer:
         if isinstance(key, (int, float, str, slice, list, np.ndarray)):
             index = index_combo_one(key, self.dataset, 0)
 
-            return self.dataset[index]
+            return self.dataset.encoding.decode(self.dataset[index])
 
         elif isinstance(key, tuple):
             key_len = len(key)
 
             if key_len == 0:
-                return self.dataset[()]
+                return self.dataset.encoding.decode(self.dataset[()])
 
             elif key_len > self.dataset.ndim:
                 raise ValueError('input must have <= ndims.')
@@ -920,7 +1021,7 @@ class LocationIndexer:
                 index_i = index_combo_one(k, self.dataset, i)
                 index.append(index_i)
 
-            return self.dataset[tuple(index)]
+            return self.dataset.encoding.decode(self.dataset[tuple(index)])
 
         else:
             raise ValueError('You passed a strange object to index...')
@@ -933,13 +1034,13 @@ class LocationIndexer:
         if isinstance(key, (int, float, str, slice, list, np.ndarray)):
             index = index_combo_one(key, self.dataset, 0)
 
-            self.dataset[index] = value
+            self.dataset[index] = self.dataset.encoding.encode(value)
 
         elif isinstance(key, tuple):
             key_len = len(key)
 
             if key_len == 0:
-                self.dataset[()] = value
+                self.dataset[()] = self.dataset.encoding.encode(value)
 
             elif key_len > self.dataset.ndim:
                 raise ValueError('input must have <= ndims.')
@@ -949,7 +1050,7 @@ class LocationIndexer:
                 index_i = index_combo_one(k, self.dataset, i)
                 index.append(index_i)
 
-            self.dataset[tuple(index)] = value
+            self.dataset[tuple(index)] = self.dataset.encoding.encode(value)
 
         else:
             raise ValueError('You passed a strange object to index...')
@@ -1073,9 +1174,92 @@ def index_combo_one(key, dataset, pos):
 
 
 
+def copy_dataset(to_file: File, from_dataset: Dataset, name, include_data=True, include_attrs=True, **kwargs):
+    """
+
+    """
+    other1 = from_dataset._dataset
+    for k in ('chunks', 'compression',
+              'compression_opts', 'scaleoffset', 'shuffle', 'fletcher32',
+              'fillvalue'):
+        kwargs.setdefault(k, getattr(other1, k))
+
+    if 'compression' in other1.attrs:
+        compression = other1.attrs['compression']
+        kwargs.update(**utils.get_compressor(compression))
+    else:
+        compression = kwargs['compression']
+
+    # TODO: more elegant way to pass these (dcpl to create_dataset?)
+    dcpl = other1.id.get_create_plist()
+    kwargs.setdefault('track_times', dcpl.get_obj_track_times())
+    # kwargs.setdefault('track_order', dcpl.get_attr_creation_order() > 0)
+
+    # Special case: the maxshape property always exists, but if we pass it
+    # to create_dataset, the new dataset will automatically get chunked
+    # layout. So we copy it only if it is different from shape.
+    if other1.maxshape != other1.shape:
+        kwargs.setdefault('maxshape', other1.maxshape)
+
+    encoding = from_dataset.encoding._encoding.copy()
+    shape = from_dataset.shape
+
+    if include_data:
+        ds0 = create_h5py_dataset(to_file, name, tuple(dim.label for dim in other1.dims), shape, encoding, **kwargs)
+
+        # Directly copy chunks using write_direct_chunk
+        for chunk in ds0.iter_chunks():
+            chunk_starts = tuple(c.start for c in chunk)
+            filter_mask, data = other1.id.read_direct_chunk(chunk_starts)
+            ds0.id.write_direct_chunk(chunk_starts, data, filter_mask)
+
+    else:
+        ds0 = create_h5py_dataset(to_file, name, tuple(dim.label for dim in other1.dims), shape, encoding, **kwargs)
+
+    ds = Dataset(ds0, to_file, encoding)
+    if include_attrs:
+        ds.attrs.update(from_dataset.attrs)
+
+    return ds
 
 
+def copy_dimension(to_file: File, from_dimension: Dimension, name, include_attrs=True, **kwargs):
+    """
 
+    """
+    other1 = from_dimension._dataset
+    for k in ('chunks', 'compression',
+              'compression_opts', 'scaleoffset', 'shuffle', 'fletcher32',
+              'fillvalue'):
+        kwargs.setdefault(k, getattr(other1, k))
+
+    if 'compression' in other1.attrs:
+        compression = other1.attrs['compression']
+        kwargs.update(**utils.get_compressor(compression))
+    else:
+        compression = kwargs['compression']
+
+    # TODO: more elegant way to pass these (dcpl to create_dataset?)
+    dcpl = other1.id.get_create_plist()
+    kwargs.setdefault('track_times', dcpl.get_obj_track_times())
+    # kwargs.setdefault('track_order', dcpl.get_attr_creation_order() > 0)
+
+    # Special case: the maxshape property always exists, but if we pass it
+    # to create_dataset, the new dataset will automatically get chunked
+    # layout. So we copy it only if it is different from shape.
+    if other1.maxshape != other1.shape:
+        kwargs.setdefault('maxshape', other1.maxshape)
+
+    encoding = from_dimension.encoding._encoding.copy()
+    shape = from_dimension.shape
+
+    ds0 = create_h5py_dimension(to_file, name, from_dimension.data, shape, encoding, **kwargs)
+
+    ds = Dimension(ds0, to_file, encoding)
+    if include_attrs:
+        ds.attrs.update(from_dimension.attrs)
+
+    return ds
 
 
 
@@ -1089,6 +1273,7 @@ d
 ##############################################
 ### Testing
 
+name = '/media/data01/cache/tethys/test/test1.h5'
 nc1 = '/media/data01/cache/tethys/test/2m_temperature_1950-1957_reanalysis-era5-land.nc'
 nc2 = '/media/data01/cache/tethys/test/test2.nc'
 nc3 = '/media/data01/cache/tethys/test/test3.nc'
@@ -1098,6 +1283,7 @@ dim1_len = 100
 dim2_len = 10000
 
 dim1_data = np.arange(dim1_len, dim1_len*2, dtype='int16')
+dim1_data = np.arange(dim1_len, dim1_len*2, dtype='datetime64[h]')
 dim2_data = np.arange(dim2_len, dim2_len*2, dtype='int16')
 
 self = File(name, 'w', compression='zstd')
@@ -1112,11 +1298,13 @@ self = File(name, 'w', compression='zstd')
 dim1_test = self.create_dimension('dim1', data=dim1_data)
 dim2_test = self.create_dimension('dim2', data=dim2_data)
 
-test1_data = np.arange(dim1_len*dim2_len, dtype='int32').reshape(dim1_len, dim2_len)
+test1_data = np.arange(len(dim1_data)*len(dim2_data), dtype='int32').reshape(len(dim1_data), len(dim2_data))
 
 test1_ds = self.create_dataset('test1', dims, data=test1_data)
 
-test2_ds = self.create_dataset_like('test2', test1_ds, include_data=True)
+test2_ds = self.create_dataset_like(test1_ds, 'test2', include_data=True)
+
+test3_ds = test2_ds.copy(name='test3')
 
 self = h5py.File(name, 'w', userblock_size=512)
 self = h5py.File(name, 'r+')
@@ -1177,7 +1365,7 @@ f2 = open('/media/data01/cache/tethys/test/test_lock.lock', 'rb')
 
 fcntl.flock(f2.fileno(), fcntl.LOCK_EX)
 
-
+self = File(nc2)
 
 
 

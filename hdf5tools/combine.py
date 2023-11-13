@@ -140,22 +140,22 @@ class Combine(object):
         return xr_ds.__repr__()
 
 
-    def sel(self, selection: dict=None, include_coords: list=None, exclude_coords: list=None, include_data_vars: list=None, exclude_data_vars: list=None):
+    def sel(self, selection: dict=None, include_dims: list=None, exclude_dims: list=None, include_datasets: list=None, exclude_datasets: list=None):
         """
         Filter the data by a selection, include, and exclude. Returns a new H5 instance. The selection parameter is very similar to xarry's .sel method.
 
         Parameters
         ----------
         selection : dict
-            This filter requires a dict of coordinates using three optional types of filter values. These include slice instances (the best and preferred option), a list/np.ndarray of coordinate values, or a bool np.ndarray of the coordinate data length.
-        include_coords : list
-            A list of coordinates to include in the output. Only data variables with included coordinates will be included in the output.
-        exclude_coords : list
-            A list of coordinates to exclude from the output. Only data variables with coordinates that have not been excluded will be included in the output.
-        include_data_vars : list
-            A list of data variables to include in the output. Only coordinates that have data variables will be included in the output.
-        exclude_data_vars : list
-            A list of data variables to exclude from the output. Only coordinates that have data variables will be included in the output.
+            This filter requires a dict of dimensions using three optional types of filter values. These include slice instances (the best and preferred option), a list/np.ndarray of coordinate values, or a bool np.ndarray of the coordinate data length.
+        include_dims : list
+            A list of dimensions to include in the output. Only data variables with included dimensions will be included in the output.
+        exclude_dims : list
+            A list of dimensions to exclude from the output. Only data variables with dimensions that have not been excluded will be included in the output.
+        include_datasets : list
+            A list of datasets to include in the output. Only dimensions that have datasets will be included in the output.
+        exclude_datasets : list
+            A list of datasets to exclude from the output. Only dimensions that have datasets will be included in the output.
 
         Returns
         -------
@@ -169,10 +169,10 @@ class Combine(object):
             c._data_vars_dict = vars_dict
             c._is_regular_dict = is_regular_dict
 
-        if include_coords is not None:
+        if include_dims is not None:
             coords_rem_list = []
             for k in list(c._coords_dict.keys()):
-                if k not in include_coords:
+                if k not in include_dims:
                     _ = c._coords_dict.pop(k)
                     coords_rem_list.append(k)
 
@@ -183,10 +183,10 @@ class Combine(object):
                             c._data_vars_dict.pop(k)
                             break
 
-        if exclude_coords is not None:
+        if exclude_dims is not None:
             coords_rem_list = []
             for k in list(c._coords_dict.keys()):
-                if k in exclude_coords:
+                if k in exclude_dims:
                     _ = c._coords_dict.pop(k)
                     coords_rem_list.append(k)
 
@@ -197,26 +197,26 @@ class Combine(object):
                             c._data_vars_dict.pop(k)
                             break
 
-        if include_data_vars is not None:
-            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k in include_data_vars}
+        if include_datasets is not None:
+            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k in include_datasets}
 
-            include_coords = set()
+            include_dims = set()
             for k, v in c._data_vars_dict.items():
-                include_coords.update(set(v['dims']))
+                include_dims.update(set(v['dims']))
 
             for k in list(c._coords_dict.keys()):
-                if k not in include_coords:
+                if k not in include_dims:
                     _ = c._coords_dict.pop(k)
 
-        if exclude_data_vars is not None:
-            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k not in exclude_data_vars}
+        if exclude_datasets is not None:
+            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k not in exclude_datasets}
 
-            include_coords = set()
+            include_dims = set()
             for k, v in c._data_vars_dict.items():
-                include_coords.update(set(v['dims']))
+                include_dims.update(set(v['dims']))
 
             for k in list(c._coords_dict.keys()):
-                if k not in include_coords:
+                if k not in include_dims:
                     _ = c._coords_dict.pop(k)
 
         return c
@@ -224,16 +224,16 @@ class Combine(object):
 
     def copy(self):
         """
-        Deep copy an H5 instance.
+        Deep copy an Combine instance.
         """
         c = copy.deepcopy(self)
 
         return c
 
 
-    def coords(self):
+    def dims(self):
         """
-        A Summary of the coordinates.
+        A Summary of the dimensions.
         """
         coords_summ = {}
         for k, v in self._coords_dict.items():
@@ -244,7 +244,7 @@ class Combine(object):
         return coords_summ
 
 
-    def data_vars(self):
+    def datasets(self):
         """
         A summary of the data variables.
         """
@@ -259,10 +259,10 @@ class Combine(object):
 
     def variables(self):
         """
-        A summary of all variables/datasets. Both coordinates and data variables.
+        A summary of all variables/datasets. Both dimensions and datasets.
         """
-        coords_summ = self.coords()
-        vars_summ = self.data_vars()
+        coords_summ = self.dims()
+        vars_summ = self.datasets()
 
         coords_summ.update(vars_summ)
 
@@ -282,7 +282,7 @@ class Combine(object):
         chunks : dict of tuples
             The chunks per dataset. Must be a dictionary of dataset names with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
         unlimited_dims : str, list of str, or None
-            The dimensions/coordinates that should be assigned as "unlimited" in the hdf5 file.
+            The dimensions/dimensions that should be assigned as "unlimited" in the hdf5 file.
         compression : str or None
             The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd requires the hdf5plugin python package, but is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
         libver : The hdf5 library version according to h5py. This is for advanced users only. https://docs.h5py.org/en/stable/high/file.html#version-bounding.
@@ -470,7 +470,7 @@ def xr_to_hdf5(data: Union[List[xr.Dataset], xr.Dataset], output: Union[str, pat
     chunks : dict of tuples
         The chunks per dataset. Must be a dictionary of dataset names with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
     unlimited_dims : str, list of str, or None
-        The dimensions/coordinates that should be assigned as "unlimited" in the hdf5 file.
+        The dimensions/dimensions that should be assigned as "unlimited" in the hdf5 file.
     compression : str
         The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd requires the hdf5plugin python package, but is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
 

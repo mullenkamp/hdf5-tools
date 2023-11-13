@@ -260,7 +260,7 @@ def decode_data(data, dtype_decoded, missing_value=None, add_offset=0, scale_fac
     return data
 
 
-def get_encoding_data_from_h5py_attrs(attrs: h5py.AttributeManager):
+def get_encoding_data_from_attrs(attrs):
     """
 
     """
@@ -303,7 +303,7 @@ def process_encoding(encoding, dtype):
         encoding['missing_value'] = missing_value_dict['int64']
         encoding['_FillValue'] = encoding['missing_value']
 
-    elif ('calendar' in encoding): # Which means it's not an xr.DataArray
+    elif 'calendar' in encoding: # Which means it's not an xr.DataArray
         encoding['dtype'] = 'int64'
         if 'units' not in encoding:
             encoding['units'] = 'seconds since 1970-01-01 00:00:00'
