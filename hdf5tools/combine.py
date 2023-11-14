@@ -244,7 +244,7 @@ class Combine(object):
         return coords_summ
 
 
-    def variables(self):
+    def data_vars(self):
         """
         A summary of the data variables.
         """
@@ -257,9 +257,9 @@ class Combine(object):
         return vars_summ
 
 
-    def datasets(self):
+    def variables(self):
         """
-        A summary of all coordinates/variables. Both coordinates and variables.
+        A summary of all coordinates and data variables.
         """
         coords_summ = self.dims()
         vars_summ = self.datasets()

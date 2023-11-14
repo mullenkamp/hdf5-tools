@@ -385,7 +385,7 @@ def get_encodings(files, group=None):
             if isinstance(data, xr.DataArray):
                 encoding = get_encoding_data_from_xr(data.encoding)
             else:
-                encoding = get_encoding_data_from_h5py_attrs(data.attrs)
+                encoding = get_encoding_data_from_attrs(data.attrs)
             enc = process_encoding(encoding, data.dtype)
             enc = assign_dtype_decoded(enc)
             # file_encs[i].update({name: enc})
@@ -950,7 +950,20 @@ def fill_ds_by_files(ds, files, ds_vars, var_name, group, encodings):
                 ds[g_chunk_slices] = l_data
 
 
+def get_dtype_shape(data=None, dtype=None, shape=None):
+    """
 
+    """
+    if data is None:
+        if (shape is None) or (dtype is None):
+            raise ValueError('shape and dtype must be passed or data must be passed.')
+        if not isinstance(dtype, str):
+            dtype = dtype.name
+    else:
+        shape = data.shape
+        dtype = data.dtype.name
+
+    return dtype, shape
 
 
 
