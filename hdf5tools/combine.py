@@ -146,15 +146,15 @@ class Combine(object):
         Parameters
         ----------
         selection : dict
-            This filter requires a dict of dimensions using three optional types of filter values. These include slice instances (the best and preferred option), a list/np.ndarray of coordinate values, or a bool np.ndarray of the coordinate data length.
-        include_dims : list
-            A list of dimensions to include in the output. Only data variables with included dimensions will be included in the output.
+            This filter requires a dict of coordinates using three optional types of filter values. These include slice instances (the best and preferred option), a list/np.ndarray of coordinate values, or a bool np.ndarray of the coordinate data length.
+        include_coords : list
+            A list of coordinates to include in the output. Only data variables with included coordinates will be included in the output.
         exclude_dims : list
-            A list of dimensions to exclude from the output. Only data variables with dimensions that have not been excluded will be included in the output.
-        include_datasets : list
-            A list of datasets to include in the output. Only dimensions that have datasets will be included in the output.
-        exclude_datasets : list
-            A list of datasets to exclude from the output. Only dimensions that have datasets will be included in the output.
+            A list of coordinates to exclude from the output. Only data variables with coordinates that have not been excluded will be included in the output.
+        include_data_vars : list
+            A list of data variables to include in the output. Only coordinates that have data variables will be included in the output.
+        exclude_data_vars : list
+            A list of data variables to exclude from the output. Only coordinates that have data variables will be included in the output.
 
         Returns
         -------
