@@ -10,13 +10,12 @@ import numpy as np
 import xarray as xr
 # from time import time
 # import numcodecs
-# import utils
-from hdf5tools import utils
 import hdf5plugin
 from typing import Union, List
 import pathlib
 import copy
 
+from . import utils
 # import utils
 
 ##############################################
@@ -32,7 +31,7 @@ import copy
 ### Class
 
 
-class H5(object):
+class Combine(object):
     """
     Class to load and combine one or more HDF5 data files (or xarray datasets) with optional filters. The class will then export the combined data to an HDF5 file, file object, or xr.Dataset.
 
@@ -150,7 +149,7 @@ class H5(object):
             This filter requires a dict of coordinates using three optional types of filter values. These include slice instances (the best and preferred option), a list/np.ndarray of coordinate values, or a bool np.ndarray of the coordinate data length.
         include_coords : list
             A list of coordinates to include in the output. Only data variables with included coordinates will be included in the output.
-        exclude_coords : list
+        exclude_dims : list
             A list of coordinates to exclude from the output. Only data variables with coordinates that have not been excluded will be included in the output.
         include_data_vars : list
             A list of data variables to include in the output. Only coordinates that have data variables will be included in the output.
@@ -200,23 +199,23 @@ class H5(object):
         if include_data_vars is not None:
             c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k in include_data_vars}
 
-            include_coords = set()
+            include_dims = set()
             for k, v in c._data_vars_dict.items():
-                include_coords.update(set(v['dims']))
+                include_dims.update(set(v['dims']))
 
             for k in list(c._coords_dict.keys()):
-                if k not in include_coords:
+                if k not in include_dims:
                     _ = c._coords_dict.pop(k)
 
         if exclude_data_vars is not None:
             c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k not in exclude_data_vars}
 
-            include_coords = set()
+            include_dims = set()
             for k, v in c._data_vars_dict.items():
-                include_coords.update(set(v['dims']))
+                include_dims.update(set(v['dims']))
 
             for k in list(c._coords_dict.keys()):
-                if k not in include_coords:
+                if k not in include_dims:
                     _ = c._coords_dict.pop(k)
 
         return c
@@ -224,7 +223,7 @@ class H5(object):
 
     def copy(self):
         """
-        Deep copy an H5 instance.
+        Deep copy an Combine instance.
         """
         c = copy.deepcopy(self)
 
@@ -259,10 +258,10 @@ class H5(object):
 
     def variables(self):
         """
-        A summary of all variables/datasets. Both coordinates and data variables.
+        A summary of all coordinates and data variables.
         """
-        coords_summ = self.coords()
-        vars_summ = self.data_vars()
+        coords_summ = self.dims()
+        vars_summ = self.datasets()
 
         coords_summ.update(vars_summ)
 
@@ -282,7 +281,7 @@ class H5(object):
         chunks : dict of tuples
             The chunks per dataset. Must be a dictionary of dataset names with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
         unlimited_dims : str, list of str, or None
-            The dimensions/coordinates that should be assigned as "unlimited" in the hdf5 file.
+            The dimensions/dimensions that should be assigned as "unlimited" in the hdf5 file.
         compression : str or None
             The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd requires the hdf5plugin python package, but is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
         libver : The hdf5 library version according to h5py. This is for advanced users only. https://docs.h5py.org/en/stable/high/file.html#version-bounding.
@@ -326,7 +325,12 @@ class H5(object):
                         if coord in chunks:
                             chunks1 = chunks[coord]
 
-                    ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=dtype, track_order=True, **compressor)
+                    if dtype == 'object':
+                        coord_dtype = h5py.string_dtype()
+                    else:
+                        coord_dtype = dtype
+
+                    ds = nf1.create_dataset(coord, shape, chunks=chunks1, maxshape=maxshape, dtype=coord_dtype, track_order=True, **compressor)
 
                     ds[:] = arr
 
@@ -361,7 +365,12 @@ class H5(object):
                     else:
                         compressor1 = compressor
 
-                    ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=vars_dict[var_name]['dtype'], fillvalue=vars_dict[var_name]['fillvalue'], track_order=True, **compressor1)
+                    if vars_dict[var_name]['dtype'] == 'object':
+                        ds_dtype = h5py.string_dtype()
+                    else:
+                        ds_dtype = vars_dict[var_name]['dtype']
+
+                    ds = nf1.create_dataset(var_name, shape, chunks=chunks1, maxshape=maxshape, dtype=ds_dtype, fillvalue=vars_dict[var_name]['fillvalue'], track_order=True, **compressor1)
 
                     for i, dim in enumerate(dims):
                         ds.dims[i].attach_scale(nf1[dim])
@@ -405,8 +414,6 @@ class H5(object):
                 for ds_name, encs in self._encodings.items():
                     if ds_name in nf1:
                         for f, enc in encs.items():
-                            if 'dtype' in f:
-                                enc = enc.name
                             nf1[ds_name].attrs.update({f: enc})
 
                 # nf1.attrs['_NCProperties'] = b'version=2,hdf5=1.12.2,h5py=3.7.0'
@@ -440,6 +447,9 @@ class H5(object):
         return xr_ds
 
 
+## Backwards compatibility
+H5 = Combine
+
 ################################################
 ### Convenience functions
 
@@ -459,7 +469,7 @@ def xr_to_hdf5(data: Union[List[xr.Dataset], xr.Dataset], output: Union[str, pat
     chunks : dict of tuples
         The chunks per dataset. Must be a dictionary of dataset names with tuple values of appropriate dimensions. A value of None will perform auto-chunking.
     unlimited_dims : str, list of str, or None
-        The dimensions/coordinates that should be assigned as "unlimited" in the hdf5 file.
+        The dimensions/dimensions that should be assigned as "unlimited" in the hdf5 file.
     compression : str
         The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd requires the hdf5plugin python package, but is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
 
@@ -467,7 +477,7 @@ def xr_to_hdf5(data: Union[List[xr.Dataset], xr.Dataset], output: Union[str, pat
     -------
     None
     """
-    H5(data).to_hdf5(output, group, chunks, unlimited_dims, compression)
+    Combine(data).to_hdf5(output, group, chunks, unlimited_dims, compression)
 
 
 
