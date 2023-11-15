@@ -139,7 +139,7 @@ class Combine(object):
         return xr_ds.__repr__()
 
 
-    def sel(self, selection: dict=None, include_dims: list=None, exclude_dims: list=None, include_datasets: list=None, exclude_datasets: list=None):
+    def sel(self, selection: dict=None, include_coords: list=None, exclude_coords: list=None, include_data_vars: list=None, exclude_data_vars: list=None):
         """
         Filter the data by a selection, include, and exclude. Returns a new H5 instance. The selection parameter is very similar to xarry's .sel method.
 
@@ -168,10 +168,10 @@ class Combine(object):
             c._data_vars_dict = vars_dict
             c._is_regular_dict = is_regular_dict
 
-        if include_dims is not None:
+        if include_coords is not None:
             coords_rem_list = []
             for k in list(c._coords_dict.keys()):
-                if k not in include_dims:
+                if k not in include_coords:
                     _ = c._coords_dict.pop(k)
                     coords_rem_list.append(k)
 
@@ -182,10 +182,10 @@ class Combine(object):
                             c._data_vars_dict.pop(k)
                             break
 
-        if exclude_dims is not None:
+        if exclude_coords is not None:
             coords_rem_list = []
             for k in list(c._coords_dict.keys()):
-                if k in exclude_dims:
+                if k in exclude_coords:
                     _ = c._coords_dict.pop(k)
                     coords_rem_list.append(k)
 
@@ -196,8 +196,8 @@ class Combine(object):
                             c._data_vars_dict.pop(k)
                             break
 
-        if include_datasets is not None:
-            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k in include_datasets}
+        if include_data_vars is not None:
+            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k in include_data_vars}
 
             include_dims = set()
             for k, v in c._data_vars_dict.items():
@@ -207,8 +207,8 @@ class Combine(object):
                 if k not in include_dims:
                     _ = c._coords_dict.pop(k)
 
-        if exclude_datasets is not None:
-            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k not in exclude_datasets}
+        if exclude_data_vars is not None:
+            c._data_vars_dict = {k: v for k, v in c._data_vars_dict.items() if k not in exclude_data_vars}
 
             include_dims = set()
             for k, v in c._data_vars_dict.items():
