@@ -7,9 +7,9 @@ Created on Tue Nov 14 13:21:10 2023
 """
 import numpy as np
 
-# from hdf5tools import utils
+from . import utils
 
-import utils
+# import utils
 
 
 sup = np.testing.suppress_warnings()

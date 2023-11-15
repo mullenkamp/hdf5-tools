@@ -10,13 +10,12 @@ import numpy as np
 import xarray as xr
 # from time import time
 # import numcodecs
-# import utils
-from hdf5tools import utils
 import hdf5plugin
 from typing import Union, List
 import pathlib
 import copy
 
+from . import utils
 # import utils
 
 ##############################################

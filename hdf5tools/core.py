@@ -30,9 +30,9 @@ except ImportError:
     import_xarray = False
 
 
-# from hdf5tools import utils, indexers
+from . import utils, indexers
 
-import utils, indexers
+# import utils, indexers
 
 
 h5py.get_config().track_order = True
