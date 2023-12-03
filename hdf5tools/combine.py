@@ -105,7 +105,7 @@ class Combine(object):
             ## Create empty xr.Dataset
             data_vars = {}
             for k, v in self._data_vars_dict.items():
-                if 'datetime' in v['dtype_decoded'].name:
+                if 'datetime' in v['dtype_decoded']:
                     data_vars[k] = (v['dims'], np.empty(v['shape'], dtype=np.dtype('datetime64[ns]')))
                 else:
                     data_vars[k] = (v['dims'], np.empty(v['shape'], dtype=v['dtype_decoded']))
