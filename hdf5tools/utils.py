@@ -280,13 +280,16 @@ def get_encoding_data_from_attrs(attrs):
     return encoding
 
 
-def get_encoding_data_from_xr(xr_encoding):
+def get_encoding_data_from_xr(data):
     """
 
     """
-    encoding = {f: v for f, v in xr_encoding.items() if f in enc_fields}
+    attrs = {f: v for f, v in data.attrs.items() if (f in enc_fields) and (f not in ignore_attrs)}
+    encoding = {f: v for f, v in data.encoding.items() if (f in enc_fields) and (f not in ignore_attrs)}
 
-    return encoding
+    attrs.update(encoding)
+
+    return attrs
 
 
 def process_encoding(encoding, dtype):
@@ -383,7 +386,7 @@ def get_encodings(files, group=None):
         for name in ds_list:
             data = file[name]
             if isinstance(data, xr.DataArray):
-                encoding = get_encoding_data_from_xr(data.encoding)
+                encoding = get_encoding_data_from_xr(data)
             else:
                 encoding = get_encoding_data_from_attrs(data.attrs)
             enc = process_encoding(encoding, data.dtype)
@@ -415,7 +418,12 @@ def get_attrs(files, group):
         with open_file(file1, group) as file:
             global_attrs.update(dict(file.attrs))
 
-            for name in file:
+            if isinstance(file, xr.Dataset):
+                vars_list = list(file.variables)
+            else:
+                vars_list = [name for name in file]
+
+            for name in vars_list:
                 attr = {f: v for f, v in file[name].attrs.items() if (f not in enc_fields) and (f not in ignore_attrs)}
 
                 if name in attrs:
