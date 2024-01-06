@@ -97,7 +97,7 @@ ds_ids = set([os.path.split(f)[-1].split('_')[0] for f in files])
 ## Test data
 before_dict = {}
 for ds_id in ds_ids:
-    before = xr_concat([xr.open_dataset(f, engine='h5netcdf') for f in files if ds_id in f])
+    before = xr_concat([xr.load_dataset(f, engine='h5netcdf') for f in files if ds_id in f])
     before_dict[ds_id] = before
 
 
@@ -175,12 +175,12 @@ def test_H5_xr(ds_id):
     """
 
     """
-    ds_files = [xr.open_dataset(f, engine='h5netcdf') for f in files if ds_id in f]
+    ds_files = [xr.load_dataset(f, engine='h5netcdf') for f in files if ds_id in f]
     h1 = H5(ds_files)
     # print(h1)
     new_path = os.path.join(base_path, ds_id + '_test1.h5')
     h1.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='h5netcdf')
+    x1 = xr.load_dataset(new_path, engine='h5netcdf')
     # print(x1)
 
     ## Compare before and after
@@ -192,8 +192,7 @@ def test_H5_xr(ds_id):
     h2 = h1.sel({'time': slice(first_times[0], first_times[-1])})
     # print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    x1.load()
+    x1 = xr.load_dataset(new_path, engine='h5netcdf')
     before2 = before.sel({'time': slice(first_times[0], first_times[-2])})
     # print(x1)
     assert before2.equals(x1)
@@ -203,8 +202,7 @@ def test_H5_xr(ds_id):
     h2 = h1.sel(include_data_vars=main_vars)
     # print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    x1.load()
+    x1 = xr.load_dataset(new_path, engine='h5netcdf')
     # print(x1)
     assert before[main_vars].equals(x1)
     x1.close()
@@ -222,7 +220,7 @@ def test_H5_hdf5(ds_id):
     # print(h1)
     new_path = os.path.join(base_path, ds_id + '_test1.h5')
     h1.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='h5netcdf')
+    x1 = xr.load_dataset(new_path, engine='h5netcdf')
     # print(x1)
 
     ## Compare before and after
@@ -234,8 +232,7 @@ def test_H5_hdf5(ds_id):
     h2 = h1.sel({'time': slice(first_times[0], first_times[-1])})
     # print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    x1.load()
+    x1 = xr.load_dataset(new_path, engine='h5netcdf')
     before2 = before.sel({'time': slice(first_times[0], first_times[-2])})
     # print(x1)
     assert before2.equals(x1)
@@ -245,8 +242,7 @@ def test_H5_hdf5(ds_id):
     h2 = h1.sel(include_data_vars=main_vars)
     # print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    x1.load()
+    x1 = xr.load_dataset(new_path, engine='h5netcdf')
     # print(x1)
     assert before[main_vars].equals(x1)
     x1.close()
@@ -266,13 +262,13 @@ def test_H5_mix(ds_id):
             if i == 0:
                 ds_files.append(f)
             else:
-                ds_files.append(xr.open_dataset(f, engine='h5netcdf'))
+                ds_files.append(xr.load_dataset(f, engine='h5netcdf'))
 
     h1 = H5(ds_files)
     # print(h1)
     new_path = os.path.join(base_path, ds_id + '_test1.h5')
     h1.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='h5netcdf')
+    x1 = xr.load_dataset(new_path, engine='h5netcdf')
     # print(x1)
 
     ## Compare before and after
@@ -284,8 +280,7 @@ def test_H5_mix(ds_id):
     h2 = h1.sel({'time': slice(first_times[0], first_times[-1])})
     # print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    x1.load()
+    x1 = xr.load_dataset(new_path, engine='h5netcdf')
     before2 = before.sel({'time': slice(first_times[0], first_times[-2])})
     # print(x1)
     assert before2.equals(x1)
@@ -295,8 +290,7 @@ def test_H5_mix(ds_id):
     h2 = h1.sel(include_data_vars=main_vars)
     # print(h2)
     h2.to_hdf5(new_path)
-    x1 = xr.open_dataset(new_path, engine='h5netcdf')
-    x1.load()
+    x1 = xr.load_dataset(new_path, engine='h5netcdf')
     # print(x1)
     assert before[main_vars].equals(x1)
 
