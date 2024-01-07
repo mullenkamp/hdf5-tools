@@ -45,6 +45,7 @@ dependencies = [
   "h5netcdf",
   "coverage[toml]>=6.5",
   "pytest",
+  "twine"
 ]
 
 [tool.hatch.build]

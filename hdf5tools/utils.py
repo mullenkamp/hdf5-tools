@@ -457,27 +457,22 @@ def open_file(path, group=None):
 
     """
     if isinstance(path, (str, pathlib.Path, io.IOBase)):
-        if isinstance(group, str):
-            f = h5py.File(path, 'r')[group]
-        else:
+        try:
             f = h5py.File(path, 'r')
-    elif isinstance(path, h5py.File):
-        if isinstance(group, str):
-            try:
-                f = path[group]
-            except:
-                f = path
-        else:
-            f = path
-    elif isinstance(path, xr.Dataset):
+        except:
+            f = xr.open_dataset(path, cache=False)
+    elif isinstance(path, (h5py.File, xr.Dataset)):
         f = path
     elif isinstance(path, bytes):
-        if isinstance(group, str):
-            f = h5py.File(io.BytesIO(path), 'r')[group]
-        else:
+        try:
             f = h5py.File(io.BytesIO(path), 'r')
+        except:
+            f = xr.open_dataset(io.BytesIO(path), cache=False)
     else:
         raise TypeError('path must be a str/pathlib path to an HDF5 file, an h5py.File, a bytes object of an HDF5 file, or an xarray Dataset.')
+
+    if isinstance(group, str) and not isinstance(f, xr.Dataset):
+        f = f[group]
 
     return f
 

@@ -429,7 +429,7 @@ class Combine(object):
 
     def to_xarray(self):
         """
-        Save an HDF5 file to an io.BytesIO object which is then opened by xr.open_dataset using the h5netcf engine.
+        Save an HDF5 file to an io.BytesIO object which is then opened by xr.open_dataset using the h5netcdf engine.
 
         Returns
         -------
