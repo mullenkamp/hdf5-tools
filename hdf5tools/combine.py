@@ -105,7 +105,7 @@ class Combine(object):
             ## Create empty xr.Dataset
             data_vars = {}
             for k, v in self._data_vars_dict.items():
-                if 'datetime' in v['dtype_decoded'].name:
+                if 'datetime' in v['dtype_decoded']:
                     data_vars[k] = (v['dims'], np.empty(v['shape'], dtype=np.dtype('datetime64[ns]')))
                 else:
                     data_vars[k] = (v['dims'], np.empty(v['shape'], dtype=v['dtype_decoded']))
@@ -268,7 +268,7 @@ class Combine(object):
         return coords_summ
 
 
-    def to_hdf5(self, output: Union[str, pathlib.Path, io.BytesIO], group=None, chunks=None, unlimited_dims=None, compression='zstd', libver='earliest'):
+    def to_hdf5(self, output: Union[str, pathlib.Path, io.BytesIO], group=None, chunks=None, unlimited_dims=None, compression='lzf', libver='earliest'):
         """
         Method to output the filtered data to an HDF5 file or file object.
 
@@ -429,7 +429,7 @@ class Combine(object):
 
     def to_xarray(self):
         """
-        Save an HDF5 file to an io.BytesIO object which is then opened by xr.open_dataset using the h5netcf engine.
+        Save an HDF5 file to an io.BytesIO object which is then opened by xr.open_dataset using the h5netcdf engine.
 
         Returns
         -------
@@ -454,7 +454,7 @@ H5 = Combine
 ### Convenience functions
 
 
-def xr_to_hdf5(data: Union[List[xr.Dataset], xr.Dataset], output: Union[str, pathlib.Path, io.BytesIO], group=None, chunks=None, unlimited_dims=None, compression='zstd'):
+def xr_to_hdf5(data: Union[List[xr.Dataset], xr.Dataset], output: Union[str, pathlib.Path, io.BytesIO], group=None, chunks=None, unlimited_dims=None, compression='lzf'):
     """
     Convenience function to take one or more xr.Datasets and output the data to an HDF5 file or file object.
 

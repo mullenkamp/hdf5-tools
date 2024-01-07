@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hdf5tools"
-version = '0.4.1'
+version = '0.4.3'
 description = "Python hdf5 tools"
 readme = "README.rst"
 license = "Apache-2.0"
@@ -38,13 +38,14 @@ include = [
 ]
 
 [tool.hatch.envs.default]
-python = "3.9"
+python = "3.10"
 dependencies = [
   "spyder-kernels==2.4",
   "matplotlib",
   "h5netcdf",
   "coverage[toml]>=6.5",
   "pytest",
+  "twine"
 ]
 
 [tool.hatch.build]

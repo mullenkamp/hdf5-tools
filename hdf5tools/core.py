@@ -31,7 +31,6 @@ except ImportError:
 
 
 from . import utils, indexers
-
 # import utils, indexers
 
 
@@ -548,18 +547,51 @@ class Variable:
         self._dataset = dataset
         self.coords = tuple(dim.label for dim in dataset.dims)
         self.ndim = dataset.ndim
-        self.shape = dataset.shape
-        self.size = dataset.size
         self.dtype = dataset.dtype
-        self.nbytes = dataset.nbytes
         self.chunks = dataset.chunks
-        self.fillvalue = dataset.fillvalue
         self.name = dataset.name.split('/')[-1]
         self.file = file
         setattr(file, self.name, self)
         self.attrs = Attributes(dataset.attrs)
         self.encoding = Encoding(dataset.attrs, dataset.dtype, file.writable, encoding)
         self.loc = indexers.LocationIndexer(self)
+
+
+    @property
+    def shape(self):
+        return self._dataset.shape
+
+    @property
+    def size(self):
+        return self._dataset.size
+
+    @property
+    def nbytes(self):
+        return self._dataset.nbytes
+
+    @property
+    def maxshape(self):
+        return self._dataset.maxshape
+
+    @property
+    def fillvalue(self):
+        return self._dataset.fillvalue
+
+    def reshape(self, new_shape, axis=None):
+        """ Reshape the dataset, or the specified axis.
+
+        The dataset must be stored in chunked format; it can be resized up to
+        the "maximum shape" (keyword maxshape) specified at creation time.
+        The rank of the dataset cannot be changed.
+
+        "shape" should be a shape tuple, or if an axis is specified, an integer.
+
+        BEWARE: This functions differently than the NumPy resize() method!
+        The data is not "reshuffled" to fit in the new shape; each axis is
+        grown or shrunk independently.  The coordinates of existing data are
+        fixed.
+        """
+        self._dataset.resize(new_shape, axis)
 
 
     def __getitem__(self, key):
