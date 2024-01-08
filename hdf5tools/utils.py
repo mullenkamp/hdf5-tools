@@ -394,6 +394,11 @@ def get_encodings(files, group=None):
             # file_encs[i].update({name: enc})
 
             if name in encs:
+                # TODO: equality check for existing enc dists
+                new_enc = encs[name]
+                shared_items = [True for k in new_enc if (k in enc) and (new_enc[k] == enc[k])]
+                if not all(shared_items):
+                    raise ValueError(f'Not all files have the same encoding for {name}.')
                 encs[name].update(enc)
             else:
                 encs[name] = enc
