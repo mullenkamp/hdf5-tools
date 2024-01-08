@@ -283,7 +283,7 @@ class Combine(object):
         unlimited_dims : str, list of str, or None
             The dimensions/dimensions that should be assigned as "unlimited" in the hdf5 file.
         compression : str or None
-            The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd requires the hdf5plugin python package, but is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
+            The compression used for the chunks in the hdf5 files. Must be one of gzip, lzf, zstd, lz4, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd and lz4 require the hdf5plugin python package, but zstd is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
         libver : The hdf5 library version according to h5py. This is for advanced users only. https://docs.h5py.org/en/stable/high/file.html#version-bounding.
 
         Returns
@@ -427,9 +427,14 @@ class Combine(object):
             print('No data to save')
 
 
-    def to_xarray(self):
+    def to_xarray(self, **kwargs):
         """
         Save an HDF5 file to an io.BytesIO object which is then opened by xr.open_dataset using the h5netcdf engine.
+
+        Parameters
+        ----------
+        kwargs
+            Any kwargs that can be passed to open_dataset EXCEPT engine.
 
         Returns
         -------
@@ -440,7 +445,7 @@ class Combine(object):
 
             self.to_hdf5(b1)
 
-            xr_ds = xr.open_dataset(b1, engine='h5netcdf')
+            xr_ds = xr.open_dataset(b1, engine='h5netcdf', **kwargs)
         else:
             xr_ds = xr.Dataset()
 
