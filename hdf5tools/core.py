@@ -774,18 +774,19 @@ class File:
     """
 
     """
-    def __init__(self, name: Union[str, pathlib.Path, io.BytesIO]=None, mode: str='r', compression: str='zstd', write_lock=False, **kwargs):
+    def __init__(self, name: Union[str, pathlib.Path, io.BytesIO]=None, mode: str='r', compression: str='lzf', write_lock=False, **kwargs):
         """
-        The top level file object for managing cf conventions data.
+        The top level hdf5 file object for managing cf conventions data.
+        Variables are all labeled arrays. Coordinates are a type of variable that is a one-dimensional labelled array associated with a dimension of a data variable. Data variables are variables have one or more dimensions and must have coordinates assigned to their dimensions.
 
         Parameters
         ----------
         name : str, pathlib.Path, io.BytesIO, or None
             A str or pathlib.Path object to a file on disk, a BytesIO object, or None. If None, it will create an in-memory hdf5 File.
         mode : str
-            The typical python open mode.
+            The typical python open mode. r for read, r+/a/x for read and write, w for create new file to write.
         compression : str or None
-            The default compression for all coordinatea and variables. These can be changed individually at variable/coordinate creation.
+            The default compression for all variables used for the chunks in the hdf5 files. These can be changed individually at variable creation. Must be one of gzip, lzf, zstd, lz4, or None. gzip is compatible with any hdf5 installation (not only h5py), so this should be used if interoperability across platforms is important. lzf is compatible with any h5py installation, so if only python users will need to access these files then this is a better option than gzip. zstd and lz4 require the hdf5plugin python package, but zstd is the best compression option if users have access to the hdf5plugin package. None has no compression and is generally not recommended except in niche situations.
         write_lock : bool
             Lock the file (using fcntl.flock) during write operations. Only use this when using multithreading or multiprocessing and you want to write to the same file. You probably shouldn't perform read operations during the writes.
         **kwargs
@@ -832,11 +833,17 @@ class File:
 
     @property
     def variables(self):
+        """
+        Return a tuple of all the variables (coords and data variables).
+        """
         variables = [var for var in self]
         return tuple(variables)
 
     @property
     def coords(self):
+        """
+        Return a tuple of all the coordinates.
+        """
         coords = []
         for name in self:
             if isinstance(self[name], Coordinate):
@@ -845,6 +852,9 @@ class File:
 
     @property
     def data_vars(self):
+        """
+        Return a tuple of all the data variables.
+        """
         data_vars = []
         for name in self:
             if isinstance(self[name], DataVariable):
@@ -1032,7 +1042,7 @@ class File:
 
     def to_pandas(self):
         """
-
+        Convert the entire file into a pandas DataFrame.
         """
         if not import_pandas:
             raise ImportError('pandas could not be imported.')
@@ -1053,6 +1063,15 @@ class File:
     def to_xarray(self, **kwargs):
         """
         Closes the file and opens it in xarray.
+
+        Parameters
+        ----------
+        kwargs
+            Any kwargs that can be passed to xr.open_dataset.
+
+        Returns
+        -------
+        xr.Dataset
         """
         if not import_xarray:
             raise ImportError('xarray could not be imported.')
@@ -1067,12 +1086,12 @@ class File:
             self.to_file(filename)
             self.close()
 
-        x1 = xr.open_dataset(filename, engine='h5netcdf', **kwargs)
+        x1 = xr.open_dataset(filename, **kwargs)
 
         return x1
 
 
-    def to_file(self, name: Union[str, pathlib.Path, io.BytesIO], compression: str='zstd', **file_kwargs):
+    def to_file(self, name: Union[str, pathlib.Path, io.BytesIO], compression: str='lzf', **file_kwargs):
         """
         Like copy, but must be a file path and will not be returned.
         """
@@ -1080,7 +1099,7 @@ class File:
         file.close()
 
 
-    def copy(self, name: Union[str, pathlib.Path, io.BytesIO]=None, compression: str='zstd', **file_kwargs):
+    def copy(self, name: Union[str, pathlib.Path, io.BytesIO]=None, compression: str='lzf', **file_kwargs):
         """
         Copy a file object. kwargs can be any parameter for File.
         """
