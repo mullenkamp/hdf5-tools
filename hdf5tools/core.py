@@ -1145,9 +1145,15 @@ class File:
 
     def create_data_variable(self, name: str, dims: (str, tuple, list), shape: (tuple, list)=None, dtype: np.dtype=None, data=None, scale_factor=None, add_offset=None, missing_value=None, units=None, calendar=None, dtype_decoded=None, encoding=None, **kwargs):
         """
-        Remove requirement on shape since it can be claculated from the coordinates.
+        Remove requirement on shape since it can be calculated from the coordinates.
         If fillvalue is passed, then I need to add it to the attributes later.
         If dtype is passed via encoding, then I need to use that for the dtype parameter.
+        Should I just remove the "encoding" option? Seems redundant...
+        Remove "missing_value" and only use fillvalue.
+        I need to be more clear about dtype vs dtype_decoded. Maybe call it dtype_encoded instead of just dtype?
+        Change scale_factor to scale?
+        Change add_offset to offset?
+        Add auto_encode option to determine the scale and offset automatically from the desired dtype?
         """
         if 'compression' not in kwargs:
             compression = self.compression
