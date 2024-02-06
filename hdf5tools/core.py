@@ -1145,7 +1145,9 @@ class File:
 
     def create_data_variable(self, name: str, dims: (str, tuple, list), shape: (tuple, list)=None, dtype: np.dtype=None, data=None, scale_factor=None, add_offset=None, missing_value=None, units=None, calendar=None, dtype_decoded=None, encoding=None, **kwargs):
         """
-
+        Remove requirement on shape since it can be claculated from the coordinates.
+        If fillvalue is passed, then I need to add it to the attributes later.
+        If dtype is passed via encoding, then I need to use that for the dtype parameter.
         """
         if 'compression' not in kwargs:
             compression = self.compression
