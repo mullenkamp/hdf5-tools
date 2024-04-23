@@ -306,21 +306,16 @@ def copy_coordinate(to_file, from_coordinate, name, include_attrs=True, **kwargs
     return ds
 
 
-def prepare_encodings_for_variables(dtype, scale_factor, add_offset, missing_value, units, calendar, dtype_decoded, encoding):
+def prepare_encodings_for_variables(dtype_encoded, dtype_decoded, scale_factor, add_offset, fillvalue, units, calendar):
     """
 
     """
-    if encoding is None:
-        encoding = {'dtype': dtype, 'missing_value': missing_value, 'add_offset': add_offset, 'scale_factor': scale_factor, 'units': units, 'calendar': calendar}
-        for key, value in copy.deepcopy(encoding).items():
-            if value is None:
-                del encoding[key]
-    else:
-        for key in encoding.keys():
-            if key not in utils.enc_fields:
-                raise ValueError(f'{key} is not a valid encoding parameter. They must be one or more of {utils.enc_fields}.')
+    encoding = {'dtype': dtype_encoded, 'dtype_encoded': dtype_encoded, 'missing_value': fillvalue, '_FillValue': fillvalue, 'add_offset': add_offset, 'scale_factor': scale_factor, 'units': units, 'calendar': calendar}
+    for key, value in copy.deepcopy(encoding).items():
+        if value is None:
+            del encoding[key]
 
-    if 'datetime64' in dtype:
+    if 'datetime64' in dtype_decoded:
         if 'units' not in encoding:
             encoding['units'] = 'seconds since 1970-01-01'
         if 'calendar' not in encoding:
@@ -935,15 +930,15 @@ class File:
         """
         return file_summary(self)
 
-    def sel(self, selection: dict=None, include_dims: list=None, exclude_dims: list=None, include_variables: list=None, exclude_variables: list=None, **file_kwargs):
+    def intersect(self, coords: dict=None, include_dims: list=None, exclude_dims: list=None, include_variables: list=None, exclude_variables: list=None, **file_kwargs):
         """
 
         """
         ## Check for coordinate names in input
         dims = np.asarray(self.coords)
 
-        if selection is not None:
-            keys = tuple(selection.keys())
+        if coords is not None:
+            keys = tuple(coords.keys())
             for key in keys:
                 if key not in dims:
                     raise KeyError(f'{key} is not in the coordinates.')
@@ -1002,9 +997,9 @@ class File:
         for dim_name in dims:
             old_dim = self[dim_name]
 
-            if selection is not None:
-                if dim_name in selection:
-                    data = old_dim.loc[selection[dim_name]]
+            if coords is not None:
+                if dim_name in coords:
+                    data = old_dim.loc[coords[dim_name]]
                 else:
                     data = old_dim.data
             else:
@@ -1018,13 +1013,13 @@ class File:
         for ds_name in variables:
             old_ds = self[ds_name]
 
-            if selection is not None:
+            if coords is not None:
                 ds_dims = old_ds.coords
 
                 ds_sel = []
                 for dim in ds_dims:
                     if dim in keys:
-                        ds_sel.append(selection[dim])
+                        ds_sel.append(coords[dim])
                     else:
                         ds_sel.append(None)
 
@@ -1119,7 +1114,7 @@ class File:
         return file
 
 
-    def create_coordinate(self, name, data, scale_factor=None, add_offset=None, missing_value=None, units=None, calendar=None, dtype_decoded=None, encoding=None, **kwargs):
+    def create_coordinate(self, name, data, dtype_encoded=None, dtype_decoded=None, scale_factor=None, add_offset=None, fillvalue=None, units=None, calendar=None, **kwargs):
         """
 
         """
@@ -1132,9 +1127,12 @@ class File:
 
         data = np.asarray(data)
 
-        dtype, shape = utils.get_dtype_shape(data, dtype=None, shape=None)
+        dtype_decoded, shape = utils.get_dtype_shape(data, dtype_decoded=dtype_decoded, shape=None)
 
-        encoding = prepare_encodings_for_variables(dtype, scale_factor, add_offset, missing_value, units, calendar, dtype_decoded, encoding)
+        if dtype_encoded is None:
+            dtype_encoded = dtype_decoded
+
+        encoding = prepare_encodings_for_variables(dtype_encoded, dtype_decoded, scale_factor, add_offset, fillvalue, units, calendar)
 
         coordinate = create_h5py_coordinate(self, name, data, shape, encoding, **kwargs)
         dim = Coordinate(coordinate, self, encoding)
@@ -1143,17 +1141,9 @@ class File:
         return dim
 
 
-    def create_data_variable(self, name: str, dims: (str, tuple, list), shape: (tuple, list)=None, dtype: np.dtype=None, data=None, scale_factor=None, add_offset=None, missing_value=None, units=None, calendar=None, dtype_decoded=None, encoding=None, **kwargs):
+    def create_data_variable(self, name: str, dims: (str, tuple, list), shape: (tuple, list)=None, data=None, dtype_encoded=None, dtype_decoded=None, scale_factor=None, add_offset=None, fillvalue=None, units=None, calendar=None, **kwargs):
         """
-        Remove requirement on shape since it can be calculated from the coordinates.
-        If fillvalue is passed, then I need to add it to the attributes later.
-        If dtype is passed via encoding, then I need to use that for the dtype parameter.
-        Should I just remove the "encoding" option? Seems redundant...
-        Remove "missing_value" and only use fillvalue.
-        I need to be more clear about dtype vs dtype_decoded. Maybe call it dtype_encoded instead of just dtype?
-        Change scale_factor to scale?
-        Change add_offset to offset?
-        Add auto_encode option to determine the scale and offset automatically from the desired dtype?
+        Add auto_encode option to determine the scale and offset automatically from the desired dtype? No, but provide the tool to allow the user to do it beforehand if they want.
         """
         if 'compression' not in kwargs:
             compression = self.compression
@@ -1165,9 +1155,12 @@ class File:
         if data is not None:
             data = np.asarray(data)
 
-        dtype, shape = utils.get_dtype_shape(data, dtype, shape)
+        dtype_decoded, shape = utils.get_dtype_shape(data, dtype_decoded, shape)
 
-        encoding = prepare_encodings_for_variables(dtype, scale_factor, add_offset, missing_value, units, calendar, dtype_decoded, encoding)
+        if dtype_encoded is None:
+            dtype_encoded = dtype_decoded
+
+        encoding = prepare_encodings_for_variables(dtype_encoded, dtype_decoded, scale_factor, add_offset, fillvalue, units, calendar)
 
         ds0 = create_h5py_data_variable(self, name, dims, shape, encoding, data, **kwargs)
         ds = DataVariable(ds0, self, encoding)
