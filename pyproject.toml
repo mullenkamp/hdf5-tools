@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hdf5tools"
-version = '0.4.3'
+dynamic = ["version"]
 description = "Python hdf5 tools"
 readme = "README.rst"
 license = "Apache-2.0"
@@ -52,3 +52,6 @@ dependencies = [
 exclude = [
   "hdf5tools/datasets",
 ]
+
+[tool.hatch.version]
+path = "hdf5tools/__init__.py"

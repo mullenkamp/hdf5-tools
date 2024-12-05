@@ -14,8 +14,15 @@ from typing import Union, List
 import pathlib
 import copy
 import tempfile
-import fcntl
+# import fcntl
+# import portalocker
 import uuid
+
+try:
+    import fcntl
+    import_fcntl = True
+except ImportError:
+    import_fcntl = False
 
 try:
     import pandas as pd
@@ -800,7 +807,7 @@ class File:
             file = h5py.File(name=name, track_order=True, mode='w', **kwargs)
             writable = True
         else:
-            if write_lock and writable:
+            if write_lock and writable and import_fcntl:
                 lock_fileno = os.open(name, os.O_RDONLY)
                 fcntl.flock(lock_fileno, fcntl.LOCK_EX)
 
