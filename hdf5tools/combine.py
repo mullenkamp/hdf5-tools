@@ -342,7 +342,7 @@ class Combine(object):
                     # ds.attrs['DIMENSION_LABELS'] = coord
 
                 ## Add the variables as datasets
-                vars_dict = copy.deepcopy(self._data_vars_dict)
+                vars_dict = self._data_vars_dict
 
                 for var_name in vars_dict:
                     shape = vars_dict[var_name]['shape']
