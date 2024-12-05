@@ -27,6 +27,7 @@ dependencies = [
     "h5py >=3.6.0",
     "hdf5plugin >=3.3.1",
     "xarray >=2022.03.0",
+    "numpy <2"
 ]
 
 [project.urls]
@@ -55,3 +56,10 @@ exclude = [
 
 [tool.hatch.version]
 path = "hdf5tools/__init__.py"
+
+[tool.hatch.envs.hatch-test]
+extra-dependencies = [
+  "h5netcdf",
+  'xarray==2022.6.0',
+  'numpy<2'
+]
