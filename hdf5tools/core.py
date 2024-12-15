@@ -1134,7 +1134,7 @@ class File:
 
         data = np.asarray(data)
 
-        dtype_decoded, shape = utils.get_dtype_shape(data, dtype_decoded=dtype_decoded, shape=None)
+        dtype_decoded, shape = utils.get_dtype_shape(data, dtype=dtype_decoded, shape=None)
 
         if dtype_encoded is None:
             dtype_encoded = dtype_decoded
