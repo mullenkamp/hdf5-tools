@@ -30,6 +30,17 @@ dependencies = [
     "numpy <2"
 ]
 
+[dependency-groups]
+dev = [
+  'PyQt5',
+  "spyder-kernels==2.5.2",
+  "black",
+  "mypy",
+  "ruff",
+  "pytest",
+  "pytest-cov",
+]
+
 [project.urls]
 Homepage = "https://github.com/mullenkamp/hdf5tools"
 
@@ -41,7 +52,7 @@ include = [
 [tool.hatch.envs.default]
 python = "3.10"
 dependencies = [
-  "spyder-kernels==2.4",
+  "spyder-kernels==2.5.2",
   "matplotlib",
   "h5netcdf",
   "coverage[toml]>=6.5",
