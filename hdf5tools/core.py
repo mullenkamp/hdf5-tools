@@ -1132,6 +1132,9 @@ class File:
         else:
             compression = kwargs['compression']
 
+        if fillvalue is not None:
+            kwargs['fillvalue'] = fillvalue
+
         data = np.asarray(data)
 
         dtype_decoded, shape = utils.get_dtype_shape(data, dtype=dtype_decoded, shape=None)
@@ -1158,6 +1161,9 @@ class File:
             kwargs.update({**compressor})
         else:
             compression = kwargs['compression']
+
+        if fillvalue is not None:
+            kwargs['fillvalue'] = fillvalue
 
         if data is not None:
             data = np.asarray(data)
