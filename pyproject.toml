@@ -26,8 +26,7 @@ dependencies = [
     "cftime",
     "h5py >=3.6.0",
     "hdf5plugin >=3.3.1",
-    "xarray >=2022.03.0",
-    "numpy <2"
+    "numpy >2"
 ]
 
 [dependency-groups]
@@ -39,6 +38,8 @@ dev = [
   "ruff",
   "pytest",
   "pytest-cov",
+  "h5netcdf",
+  "xarray ==2024.03.0",
 ]
 
 [project.urls]
