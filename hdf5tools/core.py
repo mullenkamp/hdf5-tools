@@ -548,7 +548,7 @@ class Variable:
         """
         self._dataset = dataset
         self.coords = tuple(dim.label for dim in dataset.dims)
-        self.ndim = dataset.ndim
+        self.ndims = dataset.ndim
         self.dtype = dataset.dtype
         self.chunks = dataset.chunks
         self.name = dataset.name.split('/')[-1]
@@ -608,7 +608,7 @@ class Variable:
     def __bool__(self):
         return self._dataset.__bool__()
 
-    def len(self):
+    def __len__(self):
         return self._dataset.len()
 
     def sel(self, selection: dict, **file_kwargs):

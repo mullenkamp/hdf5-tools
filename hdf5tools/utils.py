@@ -588,7 +588,7 @@ def index_variables(files, coords_dict, encodings, group):
                     dict1 = {'dims_order': tuple(i for i in range(len(dims))), 'global_index': global_index, 'local_index': local_index}
 
                     if ds_name in vars_dict:
-                        if not np.in1d(vars_dict[ds_name]['dims'], dims).all():
+                        if not np.isin(vars_dict[ds_name]['dims'], dims).all():
                             raise ValueError('dims are not consistant between the same named dataset: ' + ds_name)
                         # if vars_dict[ds_name]['dtype'] != ds.dtype:
                         #     raise ValueError('dtypes are not consistant between the same named dataset: ' + ds_name)
@@ -653,7 +653,7 @@ def filter_coords(coords_dict, selection, encodings):
                     raise ValueError('The boolean array does not have the same length as the coord array.')
                 bool_index = sel1
             else:
-                bool_index = np.in1d(coord_data, sel1)
+                bool_index = np.isin(coord_data, sel1)
 
         new_coord_data = encode_data(coord_data[bool_index], **encodings[coord])
 

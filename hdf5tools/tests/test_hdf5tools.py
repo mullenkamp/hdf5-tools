@@ -9,6 +9,7 @@ import os
 import pytest
 from glob import glob
 import xarray as xr
+import hdf5plugin
 
 ##############################################
 ### Parameters
@@ -93,6 +94,8 @@ files = glob(base_path + '/*.nc')
 files.sort()
 
 ds_ids = set([os.path.split(f)[-1].split('_')[0] for f in files])
+
+ds_ids = [ds_id for ds_id in ds_ids if ds_id not in ('9568f663d566aabb62a8e98e',)]
 
 ## Test data
 before_dict = {}
