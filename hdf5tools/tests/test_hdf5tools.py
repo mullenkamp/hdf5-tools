@@ -321,7 +321,6 @@ def test_H5_mix(ds_id):
         os.remove(new_path)
 
 
-
 def min_required_for_netcdf4():
     """
     The minimum requirements for making the hdf5 file netcdf4 compatible is the  libver='v110' (or earlier), all the track_order=True, and the scale assignments and labels.
